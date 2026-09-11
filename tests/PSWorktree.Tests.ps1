@@ -225,7 +225,10 @@ Describe 'worktree lifecycle' {
         Get-WtOutput { wt add dirty } | Out-Null
         Set-Content -Path 'untracked.txt' -Value 'x'
         Set-Location $script:repo
-        Get-WtOutput { wt rm dirty 2>$null } | Should -Match 'git refused'
+        # No 2>$null here: under Windows PowerShell 5.1 a redirected native stderr becomes an
+        # ErrorRecord, and with ErrorActionPreference=Stop git's own 'fatal: ...' would abort
+        # the test before wt prints its hint. Unredirected it just lands in the log.
+        Get-WtOutput { wt rm dirty } | Should -Match 'git refused'
         Test-Path (Join-Path $script:repo '.worktrees\dirty') | Should -BeTrue
         Get-WtOutput { wt rm dirty -Force } | Should -Match "removed worktree 'dirty'"
         Test-Path (Join-Path $script:repo '.worktrees\dirty') | Should -BeFalse
