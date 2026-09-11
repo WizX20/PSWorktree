@@ -6,6 +6,8 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-11
+
 ### Added
 
 - First public release of `wt`, the PowerShell git worktree helper that lived in a profile script until now.
@@ -23,3 +25,4 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
   (PowerShell first, robocopy as fallback).
 - Tab completion for sub-commands, worktree names and branch names.
 - Packaged as the `PSWorktree` PowerShell module; installable with Scoop from this repo's bucket.
+
