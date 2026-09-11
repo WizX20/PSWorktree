@@ -6,6 +6,14 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-11
+
+### Changed
+
+- chore: add the third issue template (Other) (#3)
+- chore: push the release commit with a maintainer token (#2)
+- chore(deps): Bump actions/checkout from 6 to 7 (#1)
+
 ## [1.0.0] - 2026-09-11
 
 ### Added

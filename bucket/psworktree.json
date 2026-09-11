@@ -1,10 +1,10 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "wt - git worktree helper for PowerShell: pick, cd, add, check out, rename, remove and clean worktrees, Claude Code's included.",
   "homepage": "https://github.com/WizX20/PSWorktree",
   "license": "BUSL-1.1",
-  "url": "https://github.com/WizX20/PSWorktree/releases/download/v1.0.0/PSWorktree-1.0.0.zip",
-  "hash": "ECD2215542D4E08F0C48449CF0EE890A646AA62D4D2EC3F02A47424E973F0674",
+  "url": "https://github.com/WizX20/PSWorktree/releases/download/v1.0.1/PSWorktree-1.0.1.zip",
+  "hash": "A95915E23917CE7D18C67E2F4E84D2503F0BFE4F2E03FCEC93032ABFBEE3EB3F",
   "extract_dir": "PSWorktree",
   "psmodule": {
     "name": "PSWorktree"
