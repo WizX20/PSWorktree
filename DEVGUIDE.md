@@ -96,7 +96,7 @@ If step 10 fails after step 9 pushed, create the release by hand with `git gh re
 1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate. Resource owner `WizX20`, repository access: only `PSWorktree` (ActionsMonitor has its own token, `ACTIONSMONITOR_RELEASE_TOKEN`), permissions: **Contents: Read and write** (Metadata: Read is added automatically). Expiry: one year at most — note the date.
 2. `git gh secret set PSWORKTREE_RELEASE_TOKEN -R WizX20/PSWorktree` and paste the token.
 
-The `check` job fails early with a clear message when the secret is missing. A push with this token also triggers CI on `main` for the release commit — expected, one extra run per release. Without expiry the same can be done with a GitHub App added to the ruleset's bypass list; not worth it for one maintainer.
+The `check` job fails early with a clear message when the secret is missing. CI's required **release token expiry** job reads the token's real expiry from the API (`GitHub-Authentication-Token-Expiration` header) on every PR and push: a warning 30 days out, a failure 14 days out — so an expiring token blocks merges until it is rotated, and no date has to be maintained by hand. A push with this token also triggers CI on `main` for the release commit — expected, one extra run per release. Without expiry the same can be done with a GitHub App added to the ruleset's bypass list; not worth it for one maintainer.
 
 ### Branch rules (ruleset `main`)
 
