@@ -92,15 +92,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          CONCLUSION=$(gh run list -w ci.yml -b main --status completed -L 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
-          if [ -z "$CONCLUSION" ]; then
-            echo "No completed CI run on main yet - allowing release through."
-          elif [ "$CONCLUSION" != "success" ]; then
-            echo "Latest CI run on main is '$CONCLUSION'. Refusing to release."
-            exit 1
-          else
-            echo "Latest CI run on main is success."
-          fi
+          # Look at the CI run of the exact commit being released, not "the latest completed
+          # run on main": after quick successive merges that one may be a superseded, cancelled
+          # run. Wait while the run for HEAD is still going (up to 20 minutes).
+          SHA=$(git rev-parse HEAD)
+          for attempt in $(seq 1 40); do
+            RUN=$(gh run list -w ci.yml -c "$SHA" -L 1 --json status,conclusion -q '.[0] | "\(.status)/\(.conclusion)"' 2>/dev/null || echo "")
+            case "$RUN" in
+              "") echo "No CI run for $SHA - allowing release through."; exit 0 ;;
+              completed/success) echo "CI for $SHA is success."; exit 0 ;;
+              completed/*) echo "CI for $SHA ended as '${RUN#completed/}'. Refusing to release."; exit 1 ;;
+              *) echo "CI for $SHA is $RUN - waiting..."; sleep 30 ;;
+            esac
+          done
+          echo "CI for $SHA did not finish in time. Refusing to release."
+          exit 1
 
   release:
     needs: check
