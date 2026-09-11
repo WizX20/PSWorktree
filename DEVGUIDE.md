@@ -89,9 +89,18 @@ If step 10 fails after step 9 pushed, create the release by hand with `git gh re
 
 `bucket/psworktree.json` ships with a placeholder hash until the first release has run; `scoop install psworktree` fails with a hash mismatch before that. Run `task release` once the repo is on GitHub and CI is green — it ships the manifest's `1.0.0`.
 
-### Required status checks (branch protection)
+### Required secret: `PSWORKTREE_RELEASE_TOKEN`
 
-Configure on GitHub: **Settings → Branches → Branch protection rules → `main`**. Enable **Require status checks to pass before merging** and select `lint + test (pwsh)`, `lint + test (powershell)` and `pack module zip`. Names appear in the picker after the first CI run lands. The release workflow pushes to `main` with the built-in `GITHUB_TOKEN`; if branch protection blocks that, allow the GitHub Actions app to bypass it or switch the workflow to a PAT.
+`main` is protected by a ruleset (pull requests only, squash merges only, CI checks required, no force-push; only the repository admin may bypass). `GITHUB_TOKEN` cannot bypass rulesets on a user-owned repository, so the release commit is pushed with a maintainer token:
+
+1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate. Resource owner `WizX20`, repository access: only `PSWorktree` (ActionsMonitor has its own token, `ACTIONSMONITOR_RELEASE_TOKEN`), permissions: **Contents: Read and write** (Metadata: Read is added automatically). Expiry: one year at most — note the date.
+2. `git gh secret set PSWORKTREE_RELEASE_TOKEN -R WizX20/PSWorktree` and paste the token.
+
+The `check` job fails early with a clear message when the secret is missing. A push with this token also triggers CI on `main` for the release commit — expected, one extra run per release. Without expiry the same can be done with a GitHub App added to the ruleset's bypass list; not worth it for one maintainer.
+
+### Branch rules (ruleset `main`)
+
+Managed on GitHub: **Settings → Rules → Rulesets → main**. Pull request required, `squash` the only merge method, required checks `lint + test (pwsh)`, `lint + test (powershell)` and `pack module zip`, deletion and force-push blocked; bypass list: repository admin only. Direct pushes to `main` are therefore impossible for everyone but the owner, and a PR cannot be squash-merged before CI is green.
 
 ### Repo visibility
 

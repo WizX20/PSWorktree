@@ -73,6 +73,19 @@ jobs:
           echo "should_release=true" >> "$GITHUB_OUTPUT"
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
+      - name: Require the PSWORKTREE_RELEASE_TOKEN secret
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          HAS_TOKEN: ${{ secrets.PSWORKTREE_RELEASE_TOKEN != '' }}
+        shell: bash
+        run: |
+          # main only accepts changes through pull requests; the release commit is pushed with
+          # a maintainer token that bypasses that rule. See DEVGUIDE.md -> Release process.
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::Repository secret PSWORKTREE_RELEASE_TOKEN is missing - the release push to main would be rejected."
+            exit 1
+          fi
+
       - name: Verify CI on main is green
         if: steps.decide.outputs.should_release == 'true'
         env:
@@ -100,6 +113,9 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # Pushed as the maintainer (fine-grained PAT, repository admin): the only actor that
+          # may bypass the pull-request rule on main. GITHUB_TOKEN cannot on a user-owned repo.
+          token: ${{ secrets.PSWORKTREE_RELEASE_TOKEN }}
 
       - name: Stamp version and changelog
         shell: pwsh
