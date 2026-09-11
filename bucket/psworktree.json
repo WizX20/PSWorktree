@@ -4,7 +4,7 @@
   "homepage": "https://github.com/WizX20/PSWorktree",
   "license": "BUSL-1.1",
   "url": "https://github.com/WizX20/PSWorktree/releases/download/v1.0.0/PSWorktree-1.0.0.zip",
-  "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": "ECD2215542D4E08F0C48449CF0EE890A646AA62D4D2EC3F02A47424E973F0674",
   "extract_dir": "PSWorktree",
   "psmodule": {
     "name": "PSWorktree"
