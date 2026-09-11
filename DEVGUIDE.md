@@ -93,7 +93,7 @@ If step 10 fails after step 9 pushed, create the release by hand with `git gh re
 
 `main` is protected by a ruleset (pull requests only, squash merges only, CI checks required, no force-push; only the repository admin may bypass). `GITHUB_TOKEN` cannot bypass rulesets on a user-owned repository, so the release commit is pushed with a maintainer token:
 
-1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate. Resource owner `WizX20`, repository access: only `PSWorktree` (and `ActionsMonitor`, which uses the same secret name), permissions: **Contents: Read and write** (Metadata: Read is added automatically). Expiry: one year at most — note the date.
+1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate. Resource owner `WizX20`, repository access: only `PSWorktree` (ActionsMonitor has its own token, `ACTIONSMONITOR_RELEASE_TOKEN`), permissions: **Contents: Read and write** (Metadata: Read is added automatically). Expiry: one year at most — note the date.
 2. `git gh secret set PSWORKTREE_RELEASE_TOKEN -R WizX20/PSWorktree` and paste the token.
 
 The `check` job fails early with a clear message when the secret is missing. A push with this token also triggers CI on `main` for the release commit — expected, one extra run per release. Without expiry the same can be done with a GitHub App added to the ruleset's bypass list; not worth it for one maintainer.
