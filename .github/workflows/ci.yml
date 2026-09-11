@@ -19,18 +19,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The module declares PowerShellVersion 5.1: prove it on both editions.
+        # The module declares PowerShellVersion 5.1: prove it on both editions. The step
+        # `shell:` key takes no expressions, so the edition is invoked as a command instead.
         shell: [pwsh, powershell]
     steps:
       - uses: actions/checkout@v6
 
       - name: Lint (PSScriptAnalyzer)
-        shell: ${{ matrix.shell }}
-        run: ./scripts/lint.ps1
+        shell: bash
+        run: ${{ matrix.shell }} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./scripts/lint.ps1
 
       - name: Test (Pester)
-        shell: ${{ matrix.shell }}
-        run: ./scripts/test.ps1 -CI
+        shell: bash
+        run: ${{ matrix.shell }} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./scripts/test.ps1 -CI
 
       - uses: actions/upload-artifact@v7
         if: always()
