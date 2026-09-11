@@ -23,7 +23,7 @@ jobs:
         # `shell:` key takes no expressions, so the edition is invoked as a command instead.
         shell: [pwsh, powershell]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Lint (PSScriptAnalyzer)
         shell: bash
@@ -44,7 +44,7 @@ jobs:
     needs: test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Pack
         shell: pwsh
