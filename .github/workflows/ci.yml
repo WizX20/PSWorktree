@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: lint + test (${{ matrix.shell }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The module declares PowerShellVersion 5.1: prove it on both editions.
+        shell: [pwsh, powershell]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Lint (PSScriptAnalyzer)
+        shell: ${{ matrix.shell }}
+        run: ./scripts/lint.ps1
+
+      - name: Test (Pester)
+        shell: ${{ matrix.shell }}
+        run: ./scripts/test.ps1 -CI
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-${{ matrix.shell }}
+          path: dist/test-results.xml
+
+  pack:
+    name: pack module zip
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Pack
+        shell: pwsh
+        run: ./scripts/pack.ps1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: module-zip
+          path: dist/PSWorktree-*.zip

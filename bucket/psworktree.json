@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "description": "wt - git worktree helper for PowerShell: pick, cd, add, check out, rename, remove and clean worktrees, Claude Code's included.",
+  "homepage": "https://github.com/WizX20/PSWorktree",
+  "license": "BUSL-1.1",
+  "url": "https://github.com/WizX20/PSWorktree/releases/download/v1.0.0/PSWorktree-1.0.0.zip",
+  "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "extract_dir": "PSWorktree",
+  "psmodule": {
+    "name": "PSWorktree"
+  },
+  "post_install": [
+    "# The registry PSModulePath was just extended; this process still has the old value.",
+    "$mods = if (Get-Command modulesdir -ErrorAction SilentlyContinue) { modulesdir $global } else { Join-Path (Split-Path (Split-Path (Split-Path $dir))) 'modules' }",
+    "if (($env:PSModulePath -split ';') -notcontains $mods) { $env:PSModulePath = \"$mods;$env:PSModulePath\" }",
+    "# 'wt' is also Windows Terminal's launcher (wt.exe). PowerShell only prefers the function once the module",
+    "# is imported, so auto-loading cannot be relied on: import it from the profile, every session.",
+    "$profilePath = $PROFILE.CurrentUserAllHosts",
+    "$line = 'Import-Module PSWorktree -ErrorAction SilentlyContinue  # wt: git worktree helper (scoop install psworktree)'",
+    "if (-not (Test-Path $profilePath)) { New-Item -ItemType File -Path $profilePath -Force | Out-Null }",
+    "if (-not (Select-String -Path $profilePath -Pattern 'Import-Module\\s+PSWorktree\\b' -Quiet)) { Add-Content -Path $profilePath -Value $line; Write-Host \"Added 'Import-Module PSWorktree' to $profilePath\" }",
+    "# And make it available right now, no new shell needed.",
+    "Import-Module (Join-Path $dir 'PSWorktree.psd1') -Global -Force"
+  ],
+  "post_uninstall": [
+    "Remove-Module PSWorktree -Force -ErrorAction SilentlyContinue",
+    "Write-Host \"The 'Import-Module PSWorktree' line in $($PROFILE.CurrentUserAllHosts) is harmless now (-ErrorAction SilentlyContinue) - delete it when convenient.\""
+  ],
+  "checkver": "github",
+  "autoupdate": {
+    "url": "https://github.com/WizX20/PSWorktree/releases/download/v$version/PSWorktree-$version.zip",
+    "extract_dir": "PSWorktree"
+  },
+  "notes": [
+    "'wt' works in this shell already and in every new one (imported from your PowerShell profile).",
+    "Type 'wt --help' to start. Windows Terminal's own launcher is still reachable as 'wt.exe'."
+  ]
+}

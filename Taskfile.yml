@@ -1,0 +1,61 @@
+# Task runner (https://taskfile.dev) — `task --list` for an overview.
+# Every task shells out to a script in scripts/, so CI and your machine run the same code.
+version: '3'
+
+vars:
+  PS: pwsh -NoProfile
+
+tasks:
+  setup:
+    desc: Maintainer, once per clone - route all GitHub traffic from this repo through the WizX20 account (see .gitconfig)
+    cmds:
+      - git config --local include.path ../.gitconfig
+      - git config user.name
+      - git config user.email
+
+  lint:
+    desc: PSScriptAnalyzer over src/, scripts/ and tests/
+    cmds:
+      - '{{.PS}} -File scripts/lint.ps1'
+
+  test:
+    desc: Pester suite (Pester 5+). Pass a path after -- to run one file
+    cmds:
+      - '{{.PS}} -File scripts/test.ps1 {{.CLI_ARGS}}'
+
+  check:
+    desc: lint + test, what CI runs
+    cmds:
+      - task: lint
+      - task: test
+
+  help:
+    desc: Print `wt --help` from the working copy (the README quotes this - keep them in sync)
+    cmds:
+      - '{{.PS}} -Command "Import-Module ./src/PSWorktree -Force; wt --help"'
+
+  link:
+    desc: Dev install - junction src/PSWorktree into your CurrentUser module path (task unlink to undo)
+    cmds:
+      - '{{.PS}} -File scripts/dev-link.ps1'
+
+  unlink:
+    desc: Remove the dev junction again
+    cmds:
+      - '{{.PS}} -File scripts/dev-link.ps1 -Remove'
+
+  pack:
+    desc: Build dist/PSWorktree-<version>.zip and print its SHA256
+    cmds:
+      - '{{.PS}} -File scripts/pack.ps1'
+
+  gh:
+    desc: Run the GitHub CLI as WizX20 without switching accounts, e.g. task gh -- pr status
+    cmds:
+      - git gh {{.CLI_ARGS}}
+
+  release:
+    desc: Dispatch the Release workflow now (also runs weekly on its own). VERSION=x.y.z forces a version, else next patch
+    cmds:
+      - git gh workflow run release.yml -f version={{.VERSION}}
+      - git gh run list -w release.yml -L 1

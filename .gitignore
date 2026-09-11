@@ -1,0 +1,11 @@
+# Build output (task pack / CI): the release zip and the staged module folder
+dist/
+
+# Claude Code session state
+.claude/
+
+# Editor / OS noise
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store

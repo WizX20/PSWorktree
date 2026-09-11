@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # The only dependencies are the actions in the workflows. Monthly is plenty for a repo this
+  # size - weekly bumps mean a CI run (and a notification) for every checkout@vN+1.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      timezone: Europe/Amsterdam
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: chore
+      include: scope

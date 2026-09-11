@@ -1,0 +1,160 @@
+name: Release
+
+# Runs once a week (Tuesday 06:00 UTC) and on manual dispatch. Nothing else triggers it.
+# A scheduled run releases only when main moved since the last release, bumping the patch
+# version; for a minor/major bump raise ModuleVersion in src/PSWorktree/PSWorktree.psd1 in
+# a PR (the next release uses it as-is), or dispatch with an explicit version.
+# One run: stamp version + CHANGELOG, lint + test, pack the zip, update the Scoop manifest
+# with the zip's hash, commit + tag on main, create the GitHub Release with the zip attached.
+on:
+  schedule:
+    - cron: "0 6 * * 2"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the v (e.g. 1.2.0). Empty = next patch version."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.decide.outputs.should_release }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Decide whether and what to release
+        id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT=$(sed -n "s/^[[:space:]]*ModuleVersion[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" src/PSWorktree/PSWorktree.psd1)
+          LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          echo "manifest version: $CURRENT; last release tag: ${LAST_TAG:-none}"
+
+          if [ -n "$LAST_TAG" ] && [ "$(git rev-parse "$LAST_TAG^{commit}")" = "$(git rev-parse HEAD)" ]; then
+            echo "main is exactly $LAST_TAG - nothing to release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          REQUESTED='${{ inputs.version }}'
+          if [ -n "$REQUESTED" ]; then
+            V="$REQUESTED"
+          elif git rev-parse -q --verify "refs/tags/v$CURRENT" >/dev/null; then
+            # The manifest version is already out: next patch.
+            IFS=. read -r MA MI PA <<< "$CURRENT"
+            V="$MA.$MI.$((PA + 1))"
+          else
+            # The manifest carries a version nobody released yet (first release, or a bump
+            # made in a PR): release exactly that.
+            V="$CURRENT"
+          fi
+
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "'$V' is not a plain x.y.z version"; exit 1; fi
+          if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then echo "tag v$V already exists"; exit 1; fi
+          HIGHEST=$(printf '%s\n%s\n' "$CURRENT" "$V" | sort -V | tail -1)
+          if [ "$HIGHEST" != "$V" ]; then echo "$V is below the manifest version $CURRENT"; exit 1; fi
+
+          echo "releasing $V"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Verify CI on main is green
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          CONCLUSION=$(gh run list -w ci.yml -b main --status completed -L 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
+          if [ -z "$CONCLUSION" ]; then
+            echo "No completed CI run on main yet - allowing release through."
+          elif [ "$CONCLUSION" != "success" ]; then
+            echo "Latest CI run on main is '$CONCLUSION'. Refusing to release."
+            exit 1
+          else
+            echo "Latest CI run on main is success."
+          fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Stamp version and changelog
+        shell: pwsh
+        run: |
+          ./scripts/set-version.ps1 -Version $env:VERSION
+          # An empty "Unreleased" section falls back to the commit subjects since the last tag.
+          ./scripts/cut-changelog.ps1 -Version $env:VERSION -FallbackFromGit | Out-Null
+          Get-Content dist/release-notes.md
+
+      - name: Lint + test the stamped module
+        shell: pwsh
+        run: |
+          ./scripts/lint.ps1
+          ./scripts/test.ps1
+
+      - name: Pack
+        id: pack
+        shell: pwsh
+        run: |
+          $r = ./scripts/pack.ps1 | Select-Object -Last 1
+          "zip=$($r.Zip)" >> $env:GITHUB_OUTPUT
+          "hash=$($r.Sha256)" >> $env:GITHUB_OUTPUT
+
+      - name: Update Scoop manifest
+        shell: pwsh
+        run: |
+          $v = $env:VERSION
+          $hash = '${{ steps.pack.outputs.hash }}'
+          $path = 'bucket/psworktree.json'
+          $j = [IO.File]::ReadAllText($path)
+          # In-place edits keep the file's formatting; the autoupdate url (v$version) is left alone.
+          $j = $j -replace '"version":\s*"[^"]*"', "`"version`": `"$v`""
+          $j = $j -replace '"url":\s*"https://github\.com/WizX20/PSWorktree/releases/download/v\d[^"]*"', "`"url`": `"https://github.com/WizX20/PSWorktree/releases/download/v$v/PSWorktree-$v.zip`""
+          $j = $j -replace '"hash":\s*"[^"]*"', "`"hash`": `"$hash`""
+          [IO.File]::WriteAllText($path, $j, [Text.UTF8Encoding]::new($false))
+          $m = Get-Content $path -Raw | ConvertFrom-Json
+          if ($m.version -ne $v -or $m.hash -ne $hash) { throw 'manifest update did not take' }
+          Get-Content $path
+
+      - name: Commit, tag and push
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/PSWorktree/PSWorktree.psd1 CHANGELOG.md bucket/psworktree.json
+          git commit -m "chore: release v$VERSION"
+          git tag -a "v$VERSION" -m "PSWorktree v$VERSION"
+          git push origin main "v$VERSION"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "v$VERSION" \
+            --title "PSWorktree v$VERSION" \
+            --notes-file dist/release-notes.md \
+            "dist/PSWorktree-$VERSION.zip"

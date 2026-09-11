@@ -1,0 +1,98 @@
+name: Bug report
+description: Something doesn't work the way it should.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. The more concrete the repro, the faster it gets fixed.
+        Paste command output as text rather than screenshots where you can.
+
+  - type: checkboxes
+    id: prechecks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched [open and closed issues](https://github.com/WizX20/PSWorktree/issues?q=) for duplicates.
+          required: true
+        - label: I ran the failing command again in a fresh shell after `Import-Module PSWorktree -Force`.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: wt version
+      description: "`(Get-Module PSWorktree).Version` — or `main` + commit if you run from a checkout."
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: powershell
+    attributes:
+      label: PowerShell
+      description: "`$PSVersionTable.PSEdition` and `.PSVersion`, plus the host (Windows Terminal, VS Code, conhost…)."
+      placeholder: "Core 7.6.3 in Windows Terminal"
+    validations:
+      required: true
+
+  - type: input
+    id: git
+    attributes:
+      label: git version
+      description: "`git --version`"
+      placeholder: "git version 2.51.0.windows.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - Scoop
+        - Manual (copied the module folder)
+        - Running from a checkout of this repo
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layout
+    attributes:
+      label: Worktree layout
+      description: Where the affected worktrees live.
+      options:
+        - .claude/worktrees (Claude Code-enabled repo)
+        - .worktrees
+        - Elsewhere (created by hand with `git worktree add`)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Number the steps so they can be followed verbatim. Include the exact `wt` command line.
+      placeholder: |
+        1. In a repo with two worktrees, run `wt clean -DryRun` …
+        2. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Full console output, including any red error text and the output of `git worktree list --porcelain` if relevant.
+      render: text
+    validations:
+      required: true
