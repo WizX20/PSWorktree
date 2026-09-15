@@ -6,6 +6,13 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-15
+
+### Changed
+
+- chore: fail CI when the release token is about to expire (#9)
+- chore: gate the release on the CI run of the exact commit (#4)
+
 ## [1.0.1] - 2026-09-11
 
 ### Changed
