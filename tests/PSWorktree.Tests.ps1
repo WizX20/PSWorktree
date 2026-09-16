@@ -152,6 +152,17 @@ Describe 'worktree lifecycle' {
         Get-WtOutput { wt list } | Should -Match '\*\s+repo\s+main'
     }
 
+    It 'list keeps the Head column on screen when a branch is wider than the console' {
+        Get-WtOutput { wt add feature/a-branch-name-long-enough-to-crowd-out-the-columns-that-follow-it } | Out-Null
+        Set-Location $script:repo
+        Mock -ModuleName PSWorktree Get-WtConsoleWidth { 60 }
+        $out = Get-WtOutput { wt list }
+        $out | Should -Match 'Cur\s+Name\s+Branch\s+Head'
+        $out | Should -Match '\*\s+repo\s+main\s+[0-9a-f]{7}'
+        $out | Should -Match 'feature-a-branch\S*\.\.\s+feature/a-\S*\.\.\s+[0-9a-f]{7}'
+        foreach ($line in ($out -split "`r?`n")) { $line.Length | Should -BeLessOrEqual 60 }
+    }
+
     It 'add creates a worktree under .worktrees, on a new branch, and cd''s into it' {
         Get-WtOutput { wt add feature/one } | Should -Match "created worktree 'feature-one'"
         (Get-Location).Path | Should -Be (Join-Path $script:repo '.worktrees\feature-one')
@@ -294,6 +305,17 @@ Describe 'clean' {
         $out | Should -Match 'dry run: would remove 3 worktree'
         $out | Should -Match 'feat-open\s+feat-open\s+open\s+\?\s+keep \(not merged\)'
         (git worktree list).Count | Should -Be 5
+    }
+
+    It 'keeps State, Dirty and Action on screen when a branch is wider than the console' {
+        Get-WtOutput { wt add dependabot/npm_and_yarn/frontend/ProspectApp/acceptance/production-8691542a09 } | Out-Null
+        Set-Location $script:repo
+        Mock -ModuleName PSWorktree Get-WtConsoleWidth { 100 }
+        $out = Get-WtOutput { wt clean -DryRun }
+        $out | Should -Match 'Name\s+Branch\s+State\s+Dirty\s+Action'
+        $out | Should -Match 'dependabot-npm\S*\.\.\s+dependabot\S*\.\.\s+no-commits\s+clean\s+remove'
+        $out | Should -Match 'feat-open\s+feat-open\s+open\s+\?\s+keep \(not merged\)'
+        foreach ($line in ($out -split "`r?`n")) { $line.Length | Should -BeLessOrEqual 100 }
     }
 
     It '-Yes removes the landed worktrees plus their local branches and keeps the open one' {
