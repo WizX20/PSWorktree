@@ -27,10 +27,11 @@ function Get-Worktrees {
 }
 function Show-Worktrees {
     $cur = (git rev-parse --show-toplevel 2>$null) -replace '\\', '/'
-    Get-Worktrees | ForEach-Object {
+    $rows = Get-Worktrees | ForEach-Object {
         $mark = if (($_.Path -replace '\\', '/') -eq $cur) { '*' } else { '' }
         [pscustomobject]@{ Cur = $mark; Name = $_.Name; Branch = $_.Branch; Head = $_.Head }
-    } | Format-Table -AutoSize
+    }
+    Write-WtTable @($rows) 'Cur', 'Name', 'Branch', 'Head'
 }
 function Resolve-Worktree {
     param([string]$Name)
@@ -222,6 +223,36 @@ function Format-WtCell {
     if ($Text.Length -le $Width) { return $Text.PadRight($Width) }
     if ($Width -le 2) { return $Text.Substring(0, $Width) }
     $Text.Substring(0, $Width - 2) + '..'
+}
+function Write-WtTable {
+    # Format-Table -AutoSize drops whole trailing columns once the wide ones fill the
+    # console, and the trailing columns are the ones that say what happens (State, Dirty,
+    # Action). Clip the branch first, then the name, so every column stays on screen.
+    param([object[]]$Rows, [string[]]$Columns)
+    if (-not $Rows) { return }
+    $w = @{}
+    foreach ($c in $Columns) {
+        $max = ($Rows | ForEach-Object { ([string]$_.$c).Length } | Measure-Object -Maximum).Maximum
+        $w[$c] = [Math]::Max([int]$max, $c.Length)
+    }
+    $gap = 2
+    $over = ($Columns | ForEach-Object { $w[$_] } | Measure-Object -Sum).Sum + $gap * ($Columns.Count - 1) - (Get-WtConsoleWidth)
+    foreach ($c in 'Branch', 'Name') {
+        if ($over -le 0 -or -not $w.ContainsKey($c)) { continue }
+        $min = if ($c -eq 'Name') { 8 } else { 12 }
+        $take = [Math]::Max(0, [Math]::Min($over, $w[$c] - $min)); $w[$c] -= $take; $over -= $take
+    }
+    $sep = ' ' * $gap
+    $head = @(); $rule = @()
+    foreach ($c in $Columns) { $head += Format-WtCell $c $w[$c]; $rule += '-' * $w[$c] }
+    Write-Host ''
+    Write-Host (($head -join $sep).TrimEnd()) -ForegroundColor Green
+    Write-Host (($rule -join $sep).TrimEnd()) -ForegroundColor Green
+    foreach ($r in $Rows) {
+        $cells = foreach ($c in $Columns) { Format-WtCell ([string]$r.$c) $w[$c] }
+        Write-Host (($cells -join $sep).TrimEnd())
+    }
+    Write-Host ''
 }
 function Write-WtLine {
     # One row of the picker, written as coloured segments - @{ T = text; F = fg; B = bg } -
@@ -648,9 +679,7 @@ function Clear-MergedWorktrees {
         }
     }
 
-    $rows | Sort-Object { -not $_.Remove }, Name |
-        Format-Table @{ n = 'Name'; e = { $_.Name } }, @{ n = 'Branch'; e = { $_.Branch } },
-        @{ n = 'State'; e = { $_.State } }, @{ n = 'Dirty'; e = { $_.Dirty } }, @{ n = 'Action'; e = { $_.Action } } -AutoSize
+    Write-WtTable @($rows | Sort-Object { -not $_.Remove }, Name) 'Name', 'Branch', 'State', 'Dirty', 'Action'
 
     $doomed = @($rows | Where-Object { $_.Remove })
     if (-not $doomed) { Write-Host 'nothing to clean' -ForegroundColor Green; return }
