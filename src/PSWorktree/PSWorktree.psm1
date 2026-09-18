@@ -224,6 +224,39 @@ function Format-WtCell {
     if ($Width -le 2) { return $Text.Substring(0, $Width) }
     $Text.Substring(0, $Width - 2) + '..'
 }
+function Get-WtDirSize {
+    # Sum of file lengths under a directory, walked with DirectoryInfo instead of
+    # Get-ChildItem -Recurse: an order of magnitude faster on a node_modules tree in
+    # Windows PowerShell 5.1, and a directory that cannot be read (access denied, or a
+    # path past MAX_PATH on 5.1) is skipped rather than aborting the walk. Reparse points
+    # are not followed - a junction would count its target twice, or loop.
+    param([string]$Path)
+    $total = [long]0
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $stack.Push($Path)
+    while ($stack.Count -gt 0) {
+        try {
+            $dir = New-Object System.IO.DirectoryInfo ($stack.Pop())
+            foreach ($f in $dir.EnumerateFiles()) { $total += $f.Length }
+            foreach ($d in $dir.EnumerateDirectories()) {
+                if (-not ($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { $stack.Push($d.FullName) }
+            }
+        }
+        catch { continue }   # unreadable directory: skip it, keep walking the rest
+    }
+    $total
+}
+function Format-WtSize {
+    # Explorer-style units (1024-based), one decimal at most. Formatted invariant on
+    # purpose: the -f operator follows the console culture and prints '2,4 GB' on a
+    # Dutch box.
+    param([long]$Bytes)
+    $units = 'B', 'KB', 'MB', 'GB', 'TB'
+    $v = [double]$Bytes; $u = 0
+    while ($v -ge 1024 -and $u -lt $units.Count - 1) { $v /= 1024; $u++ }
+    $n = if ($u -eq 0) { [string]$Bytes } else { $v.ToString('0.#', [System.Globalization.CultureInfo]::InvariantCulture) }
+    "$n $($units[$u])"
+}
 function Write-WtTable {
     # Format-Table -AutoSize drops whole trailing columns once the wide ones fill the
     # console, and the trailing columns are the ones that say what happens (State, Dirty,
@@ -679,9 +712,19 @@ function Clear-MergedWorktrees {
         }
     }
 
-    Write-WtTable @($rows | Sort-Object { -not $_.Remove }, Name) 'Name', 'Branch', 'State', 'Dirty', 'Action'
-
+    # Sizes are taken now, before anything goes: the table shows what a clean would buy,
+    # and the summary what it actually freed. Rows that stay are not walked.
     $doomed = @($rows | Where-Object { $_.Remove })
+    if ($doomed) { Write-Host "measuring $($doomed.Count) worktree(s)..." -ForegroundColor DarkGray }
+    foreach ($r in $rows) {
+        $bytes = 0; $size = '-'
+        if ($r.Remove) { $bytes = Get-WtDirSize $r.Path; $size = Format-WtSize $bytes }
+        $r | Add-Member -NotePropertyName Bytes -NotePropertyValue $bytes
+        $r | Add-Member -NotePropertyName Size -NotePropertyValue $size
+    }
+
+    Write-WtTable @($rows | Sort-Object { -not $_.Remove }, Name) 'Name', 'Branch', 'State', 'Dirty', 'Size', 'Action'
+
     if (-not $doomed) { Write-Host 'nothing to clean' -ForegroundColor Green; return }
     # Ignored files (generated config, node_modules) are gone silently - they are
     # reproducible. Untracked-but-not-ignored ones are not, so name them first.
@@ -692,13 +735,17 @@ function Clear-MergedWorktrees {
         Write-Host "  $($d.Name): deletes $($files.Count) untracked file(s): $head" -ForegroundColor Yellow
     }
     $what = if ($KeepBranch) { 'worktree(s)' } else { 'worktree(s) + local branch(es)' }
-    if ($DryRun) { Write-Host "dry run: would remove $($doomed.Count) $what" -ForegroundColor Cyan; return }
+    if ($DryRun) {
+        $total = ($doomed | Measure-Object Bytes -Sum).Sum
+        Write-Host "dry run: would remove $($doomed.Count) $what, would free $(Format-WtSize $total)" -ForegroundColor Cyan
+        return
+    }
     if (-not $Yes) {
         $doomed = @(Select-CleanTargets $doomed $what)
         if (-not $doomed) { Write-Host 'nothing selected' -ForegroundColor Yellow; return }
         Write-Host "removing $($doomed.Count) $what" -ForegroundColor Cyan
     }
-    $removed = 0
+    $removed = 0; $freed = [long]0
     foreach ($d in $doomed) {
         if ($d.Dirty -eq 'locked' -or (Get-Worktrees | Where-Object { $_.Path -eq $d.Path -and $_.Locked })) {
             git worktree unlock $d.Path 2>$null | Out-Null
@@ -710,17 +757,17 @@ function Clear-MergedWorktrees {
             continue
         }
         git worktree prune   # drops the admin entry now that the directory is gone
-        $removed++
+        $removed++; $freed += $d.Bytes
         $msg = "removed '$($d.Name)'"
         if (-not $KeepBranch -and $d.Branch -ne '-') {
             git branch -D $d.Branch 2>$null | Out-Null
             if ($LASTEXITCODE -eq 0) { $msg += " + branch '$($d.Branch)'" }
             else { $msg += " (branch '$($d.Branch)' kept - delete failed)" }
         }
-        Write-Host "  $msg" -ForegroundColor Green
+        Write-Host "  $msg ($($d.Size))" -ForegroundColor Green
     }
     git worktree prune
-    Write-Host "cleaned $removed of $($doomed.Count)" -ForegroundColor Green
+    Write-Host "cleaned $removed of $($doomed.Count) $what, reclaimed $(Format-WtSize $freed)" -ForegroundColor Green
 }
 function Show-WtHelp {
     @"
@@ -743,7 +790,7 @@ USAGE:
                               upstream base - or never diverged from it - and delete that
                               local branch. Base defaults to origin/acceptance, else
                               origin/main|master, else origin/HEAD (alias: wt prune)
-       -DryRun        only show what would go
+       -DryRun        only show what would go, and how much disk it would free
        -Yes           skip the menu and take everything listed
        -IncludeGone   also take branches whose upstream was deleted but whose
                       content was not found on the base (closed-unmerged PRs)
@@ -779,6 +826,10 @@ NOTES:
     files (node_modules, generated config) never block a removal. Uncommitted edits and
     untracked-but-not-ignored files do: a file nobody has added yet reads the same as a
     stray one, so it is kept until -Force says otherwise, and -Force lists what it takes.
+  - clean measures every candidate before it deletes anything: the Size column is the
+    sum of the file sizes in that worktree (node_modules, bin/, obj/ included - what git
+    ignores still takes up disk), junctions are not followed, and the closing line adds
+    up only the removals that succeeded.
   - module: $PSScriptRoot
   - project: https://github.com/WizX20/PSWorktree
 "@ | Write-Host

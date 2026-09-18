@@ -121,6 +121,36 @@ Describe 'pure helpers' {
         }
     }
 
+    It 'size formatting uses 1024-based units with at most one decimal, culture-independent' {
+        InModuleScope PSWorktree {
+            Format-WtSize 0 | Should -Be '0 B'
+            Format-WtSize 1023 | Should -Be '1023 B'
+            Format-WtSize 1024 | Should -Be '1 KB'
+            Format-WtSize 1536 | Should -Be '1.5 KB'
+            Format-WtSize (512 * 1MB) | Should -Be '512 MB'
+            Format-WtSize ([long](2.44 * 1GB)) | Should -Be '2.4 GB'
+            Format-WtSize (3 * 1TB) | Should -Be '3 TB'
+            Format-WtSize (2048 * 1TB) | Should -Be '2048 TB'
+        }
+    }
+
+    It 'directory size sums nested files and does not follow junctions' {
+        InModuleScope PSWorktree {
+            $root = Join-Path $TestDrive 'sized'
+            New-Item -ItemType Directory -Path (Join-Path $root 'a\b') -Force | Out-Null
+            [IO.File]::WriteAllBytes((Join-Path $root 'top.bin'), (New-Object byte[] 1000))
+            [IO.File]::WriteAllBytes((Join-Path $root 'a\mid.bin'), (New-Object byte[] 200))
+            [IO.File]::WriteAllBytes((Join-Path $root 'a\b\deep.bin'), (New-Object byte[] 34))
+            $other = Join-Path $TestDrive 'elsewhere'
+            New-Item -ItemType Directory -Path $other | Out-Null
+            [IO.File]::WriteAllBytes((Join-Path $other 'big.bin'), (New-Object byte[] 5000))
+            New-Item -ItemType Junction -Path (Join-Path $root 'link') -Target $other | Out-Null
+            Get-WtDirSize $root | Should -Be 1234
+            Get-WtDirSize (Join-Path $root 'a') | Should -Be 234
+            Get-WtDirSize (Join-Path $TestDrive 'does-not-exist') | Should -Be 0
+        }
+    }
+
     It 'slash normalisation handles empty input' {
         InModuleScope PSWorktree {
             ConvertTo-Slash 'C:\x\y' | Should -Be 'C:/x/y'
@@ -303,7 +333,7 @@ Describe 'clean' {
     It '-DryRun reports what would go and removes nothing' {
         $out = Get-WtOutput { wt clean -DryRun }
         $out | Should -Match 'dry run: would remove 3 worktree'
-        $out | Should -Match 'feat-open\s+feat-open\s+open\s+\?\s+keep \(not merged\)'
+        $out | Should -Match 'feat-open\s+feat-open\s+open\s+\?\s+-\s+keep \(not merged\)'
         (git worktree list).Count | Should -Be 5
     }
 
@@ -312,9 +342,9 @@ Describe 'clean' {
         Set-Location $script:repo
         Mock -ModuleName PSWorktree Get-WtConsoleWidth { 100 }
         $out = Get-WtOutput { wt clean -DryRun }
-        $out | Should -Match 'Name\s+Branch\s+State\s+Dirty\s+Action'
-        $out | Should -Match 'dependabot-npm\S*\.\.\s+dependabot\S*\.\.\s+no-commits\s+clean\s+remove'
-        $out | Should -Match 'feat-open\s+feat-open\s+open\s+\?\s+keep \(not merged\)'
+        $out | Should -Match 'Name\s+Branch\s+State\s+Dirty\s+Size\s+Action'
+        $out | Should -Match 'dependabot-npm\S*\.\.\s+dependabot\S*\.\.\s+no-commits\s+clean\s+\d+ B\s+remove'
+        $out | Should -Match 'feat-open\s+feat-open\s+open\s+\?\s+-\s+keep \(not merged\)'
         foreach ($line in ($out -split "`r?`n")) { $line.Length | Should -BeLessOrEqual 100 }
     }
 
@@ -337,6 +367,32 @@ Describe 'clean' {
         @(git for-each-ref --format='%(refname:short)' refs/heads) | Should -Contain 'feat-merged'
     }
 
+    It 'shows the size of each candidate, what a dry run would free, and what a clean reclaimed' {
+        # Ignored, so it does not block the removal - node_modules never does either.
+        Add-Content -Path (Join-Path $script:repo '.git\info\exclude') -Value '*.bin'
+        [IO.File]::WriteAllBytes((Join-Path $script:repo '.worktrees\feat-merged\blob.bin'), (New-Object byte[] (3MB)))
+        $out = Get-WtOutput { wt clean -DryRun }
+        $out | Should -Match 'measuring 3 worktree\(s\)'
+        $out | Should -Match 'feat-merged\s+feat-merged\s+merged\s+clean\s+3 MB\s+remove'
+        $out | Should -Match 'feat-empty\s+feat-empty\s+no-commits\s+clean\s+\d+ B\s+remove'
+        $out | Should -Match 'dry run: would remove 3 worktree\(s\) \+ local branch\(es\), would free 3 MB'
+        $out = Get-WtOutput { wt clean -Yes }
+        $out | Should -Match "removed 'feat-merged' \+ branch 'feat-merged' \(3 MB\)"
+        $out | Should -Match 'cleaned 3 of 3 worktree\(s\) \+ local branch\(es\), reclaimed 3 MB'
+    }
+
+    It 'counts only the removals that succeeded towards the reclaimed total' {
+        Add-Content -Path (Join-Path $script:repo '.git\info\exclude') -Value '*.bin'
+        [IO.File]::WriteAllBytes((Join-Path $script:repo '.worktrees\feat-merged\blob.bin'), (New-Object byte[] (3MB)))
+        # Pester needs a default mock next to the filtered one; a plain delete is enough here.
+        Mock -ModuleName PSWorktree Remove-WorktreePath { Remove-Item -LiteralPath $Path -Recurse -Force; -not (Test-Path -LiteralPath $Path) }
+        Mock -ModuleName PSWorktree Remove-WorktreePath { $false } -ParameterFilter { $Path -like '*feat-merged' }
+        $out = Get-WtOutput { wt clean -Yes }
+        $out | Should -Match "failed to delete 'feat-merged'"
+        $out | Should -Match 'cleaned 2 of 3 worktree\(s\) \+ local branch\(es\), reclaimed \d+ B'
+        $out | Should -Not -Match 'reclaimed 3 MB'
+    }
+
     It 'keeps a worktree with untracked files unless -Force, and names them' {
         Set-Content -Path (Join-Path $script:repo '.worktrees\feat-merged\draft.md') -Value 'wip'
         $out = Get-WtOutput { wt clean -DryRun }
@@ -348,7 +404,7 @@ Describe 'clean' {
     It '-Orphans picks up directories git no longer knows about' {
         New-Item -ItemType Directory -Path (Join-Path $script:repo '.worktrees\leftover') | Out-Null
         $out = Get-WtOutput { wt clean -DryRun -Orphans }
-        $out | Should -Match 'leftover\s+-\s+orphan\s+unregistered\s+remove \(directory only\)'
+        $out | Should -Match 'leftover\s+-\s+orphan\s+unregistered\s+0 B\s+remove \(directory only\)'
         $out | Should -Match 'dry run: would remove 4 worktree'
     }
 }
