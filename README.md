@@ -78,7 +78,7 @@ wt list                  # who's where
 wt clean                 # remove worktrees whose branch already landed on origin/main|acceptance
 ```
 
-`wt clean` ends in a menu rather than a blunt y/N: take everything, only the merged/squashed ones, only the never-diverged ones, only orphan directories, or pick by name with Tab completion. Nothing with uncommitted or untracked work is removed unless you say `-Force`, and `-Force` tells you what it is about to delete.
+`wt clean` ends in a menu rather than a blunt y/N: take everything, only the merged/squashed ones, only the never-diverged ones, only orphan directories, or pick by name with Tab completion. Nothing with uncommitted or untracked work is removed unless you say `-Force`, and `-Force` tells you what it is about to delete. Every candidate is measured first, so the table shows what each one holds, `-DryRun` says how much a clean would free, and the closing line reports what it reclaimed — `node_modules`, `bin/` and `obj/` included.
 
 ## `wt --help`
 
@@ -102,7 +102,7 @@ USAGE:
                               upstream base - or never diverged from it - and delete that
                               local branch. Base defaults to origin/acceptance, else
                               origin/main|master, else origin/HEAD (alias: wt prune)
-       -DryRun        only show what would go
+       -DryRun        only show what would go, and how much disk it would free
        -Yes           skip the menu and take everything listed
        -IncludeGone   also take branches whose upstream was deleted but whose
                       content was not found on the base (closed-unmerged PRs)
@@ -138,6 +138,10 @@ NOTES:
     files (node_modules, generated config) never block a removal. Uncommitted edits and
     untracked-but-not-ignored files do: a file nobody has added yet reads the same as a
     stray one, so it is kept until -Force says otherwise, and -Force lists what it takes.
+  - clean measures every candidate before it deletes anything: the Size column is the
+    sum of the file sizes in that worktree (node_modules, bin/, obj/ included - what git
+    ignores still takes up disk), junctions are not followed, and the closing line adds
+    up only the removals that succeeded.
   - module: C:\Users\you\scoop\apps\psworktree\current
   - project: https://github.com/WizX20/PSWorktree
 ```
@@ -148,7 +152,7 @@ Claude Code isolates parallel sessions in git worktrees under `<repo>/.claude/wo
 
 - **Find them** — the picker lists every worktree git knows about, Claude's included; type a few characters of the branch to filter.
 - **Same layout for your own** — `wt add` and `wt checkout` put new worktrees in `.claude/worktrees/` whenever the repo has a `.claude` directory, so Claude's and yours sit side by side. Repos without one get `.worktrees/` instead.
-- **Sweep after the merge** — `wt clean` recognises branches that landed as a squash-merge (the usual way a PR lands), not only fast-forwards, and removes the worktree plus the local branch. `-Orphans` also removes leftover directories from a removal that died halfway.
+- **Sweep after the merge** — `wt clean` recognises branches that landed as a squash-merge (the usual way a PR lands), not only fast-forwards, and removes the worktree plus the local branch, reporting the disk space that freed. `-Orphans` also removes leftover directories from a removal that died halfway.
 - **Hooks that never ran** — repos that initialise a worktree from a `post-checkout` hook silently skip it when `core.hooksPath` is not wired up; `wt add` warns when it sees a `.githooks` folder without that setting.
 - **Long names** — `wt add` warns when a worktree name is over 30 characters: deep build trees (`node_modules`, `obj`) under a long path blow past `MAX_PATH` on Windows.
 

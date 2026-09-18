@@ -6,10 +6,18 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+### Added
+
+- feat: `wt clean` shows the disk space each candidate holds (Size column), what `-DryRun` would free, and the total it reclaimed - `node_modules`, `bin/`, `obj/` included (#11)
+
 ### Fixed
 
 - fix: `wt clean` and `wt list` no longer lose their trailing columns (State/Dirty/Action, Head) when a long branch name fills the console; the branch is clipped first, then the name, like the picker already does
 - fix: a worktree directory named with `[` or `]` (or a repo path containing them) can now be entered, renamed and tab-completed; every path call is literal and the prefix match no longer goes through PowerShell wildcards, so a name ending in `[` no longer throws (#15)
+
+### Changed
+
+- chore: document the `status/planned` and `status/in-progress` issue labels in CONTRIBUTING
 
 ## [1.0.2] - 2026-09-15
 
