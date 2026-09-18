@@ -159,12 +159,27 @@ Describe 'pure helpers' {
         }
     }
 
+    It 'prefix match takes the typed text literally, ignoring case' {
+        InModuleScope PSWorktree {
+            Test-WtPrefix 'feature-three' 'FEAT' | Should -BeTrue
+            Test-WtPrefix 'feature-three' 'three' | Should -BeFalse
+            Test-WtPrefix 'feat[1]' 'feat[' | Should -BeTrue      # -like threw on the unbalanced '['
+            Test-WtPrefix 'feat[1]' 'feat[1]' | Should -BeTrue    # -like read [1] as a character class
+            Test-WtPrefix 'feat1' 'feat[1]' | Should -BeFalse
+            Test-WtPrefix 'x*y' 'x*' | Should -BeTrue
+            Test-WtPrefix 'anything' '' | Should -BeTrue
+        }
+    }
+
     It 'worktree parent is .claude/worktrees in a Claude-enabled repo, else .worktrees' {
         InModuleScope PSWorktree {
             $plain = Join-Path $TestDrive 'plain'; New-Item -ItemType Directory -Path $plain | Out-Null
             $claude = Join-Path $TestDrive 'claude'; New-Item -ItemType Directory -Path (Join-Path $claude '.claude') -Force | Out-Null
             Get-WorktreeParent $plain | Should -Be (Join-Path $plain '.worktrees')
             Get-WorktreeParent $claude | Should -Be (Join-Path $claude '.claude\worktrees')
+            # A repo path with brackets: Test-Path without -LiteralPath read [po] as a character class.
+            $odd = Join-Path $TestDrive 're[po]'; New-Item -ItemType Directory -Path (Join-Path $odd '.claude') -Force | Out-Null
+            Get-WorktreeParent $odd | Should -Be (Join-Path $odd '.claude\worktrees')
         }
     }
 }
@@ -231,6 +246,28 @@ Describe 'worktree lifecycle' {
         Set-Location $script:repo
         Get-WtOutput { wt co remote-only } | Should -Match 'already checked out'
         (Split-Path (Get-Location).Path -Leaf) | Should -Be 'remote-only'
+    }
+
+    It 'takes a directory name with [ and ] through checkout, cd, prefix, rename and rm' {
+        # Git forbids '[' in a branch name, so this only comes in through a chosen directory
+        # name - and PowerShell reads it as a wildcard unless every path call is literal.
+        Invoke-Git branch bracketed
+        Get-WtOutput { wt checkout bracketed 'feat[1]' } | Should -Match "checked out 'bracketed'"
+        (Split-Path (Get-Location).Path -Leaf) | Should -Be 'feat[1]'
+        Set-Location -LiteralPath $script:repo
+        wt 'feat[1]'
+        (Split-Path (Get-Location).Path -Leaf) | Should -Be 'feat[1]'
+        Set-Location -LiteralPath $script:repo
+        wt 'feat['                                            # used to throw: invalid wildcard pattern
+        (Split-Path (Get-Location).Path -Leaf) | Should -Be 'feat[1]'
+        Set-Location -LiteralPath $script:repo
+        Get-WtOutput { wt checkout bracketed } | Should -Match 'already checked out'
+        (Split-Path (Get-Location).Path -Leaf) | Should -Be 'feat[1]'
+        Set-Location -LiteralPath $script:repo
+        Get-WtOutput { wt rename 'feat[1]' 'feat[2]' } | Should -Match "renamed worktree 'feat\[1\]' -> 'feat\[2\]'"
+        Get-WtOutput { wt rename 'feat[2]' 'feat[2]' } | Should -Match 'target already exists'
+        Get-WtOutput { wt rm 'feat[2]' } | Should -Match "removed worktree 'feat\[2\]'"
+        (git worktree list).Count | Should -Be 1
     }
 
     It 'checkout never creates a branch' {

@@ -33,11 +33,17 @@ function Show-Worktrees {
     }
     Write-WtTable @($rows) 'Cur', 'Name', 'Branch', 'Head'
 }
+function Test-WtPrefix {
+    # Prefix match on typed text, taken literally. -like reads '[', ']', '*' and '?' as
+    # pattern characters, so 'feat[1]' never matched and an unbalanced 'feat[' threw.
+    param([string]$Text, [string]$Prefix)
+    $Text.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
 function Resolve-Worktree {
     param([string]$Name)
     $wts = Get-Worktrees
     $m = $wts | Where-Object { $_.Name -eq $Name }
-    if (-not $m) { $m = $wts | Where-Object { $_.Name -like "$Name*" } | Select-Object -First 1 }
+    if (-not $m) { $m = $wts | Where-Object { Test-WtPrefix $_.Name $Name } | Select-Object -First 1 }
     $m
 }
 function Remove-Worktree {
@@ -78,18 +84,18 @@ function Rename-Worktree {
     $main = ((git worktree list --porcelain 2>$null | Select-Object -First 1) -replace '^worktree ', '') -replace '\\', '/'
     if ($mp -eq $main) { Write-Host "refusing: '$($m.Name)' is the main worktree" -ForegroundColor Red; return }
     $newPath = Join-Path (Split-Path $m.Path -Parent) $NewName
-    if (Test-Path $newPath) { Write-Host "target already exists: $newPath" -ForegroundColor Red; return }
+    if (Test-Path -LiteralPath $newPath) { Write-Host "target already exists: $newPath" -ForegroundColor Red; return }
     $cur = (git rev-parse --show-toplevel 2>$null) -replace '\\', '/'
     $inside = ($mp -eq $cur)
-    if ($inside) { Set-Location (Split-Path $m.Path -Parent) }  # release dir so Windows can move it
+    if ($inside) { Set-Location -LiteralPath (Split-Path $m.Path -Parent) }  # release dir so Windows can move it
     git worktree move $m.Path $newPath
     if ($LASTEXITCODE -eq 0) {
         Write-Host "renamed worktree '$($m.Name)' -> '$NewName'" -ForegroundColor Green
-        if ($inside) { Set-Location $newPath }
+        if ($inside) { Set-Location -LiteralPath $newPath }
     }
     else {
         Write-Host "git worktree move failed (locked/dirty?)" -ForegroundColor Yellow
-        if ($inside) { Set-Location $m.Path }
+        if ($inside) { Set-Location -LiteralPath $m.Path }
     }
 }
 function Get-MainWorktreeRoot {
@@ -99,7 +105,7 @@ function Get-WorktreeParent {
     # Where new worktrees go: .claude/worktrees/ in a Claude-enabled repo (gitignored,
     # matches `claude -w` and Claude's own worktrees), else a plain .worktrees/ sibling dir.
     param([string]$MainRoot)
-    if (Test-Path (Join-Path $MainRoot '.claude')) { Join-Path $MainRoot '.claude\worktrees' }
+    if (Test-Path -LiteralPath (Join-Path $MainRoot '.claude')) { Join-Path $MainRoot '.claude\worktrees' }
     else { Join-Path $MainRoot '.worktrees' }
 }
 function Test-WorktreeInit {
@@ -110,7 +116,7 @@ function Test-WorktreeInit {
     $hp = (git -C $MainRoot config core.hooksPath) 2>$null
     if ($hp -and -not [System.IO.Path]::IsPathRooted($hp)) { $hp = Join-Path $MainRoot $hp }
     $wired = $hp -and (($hp -replace '/', '\').TrimEnd('\') -ieq ($want -replace '/', '\').TrimEnd('\'))
-    if ((Test-Path $want) -and -not $wired) {
+    if ((Test-Path -LiteralPath $want) -and -not $wired) {
         Write-Host "warning: repo ships .githooks but core.hooksPath is not set - worktree init hook did not run" -ForegroundColor Yellow
         Write-Host "         fix: git config core.hooksPath .githooks   (then re-init this worktree)" -ForegroundColor DarkGray
     }
@@ -126,7 +132,7 @@ function Add-Worktree {
     if (-not $mainRoot) { Write-Host 'not in a git repo' -ForegroundColor Red; return }
     $dir = $Branch -replace '[/\\]', '-'
     $path = Join-Path (Get-WorktreeParent $mainRoot) $dir
-    if (Test-Path $path) { Write-Host "path already exists: $path" -ForegroundColor Red; return }
+    if (Test-Path -LiteralPath $path) { Write-Host "path already exists: $path" -ForegroundColor Red; return }
     git show-ref --verify --quiet "refs/heads/$Branch"; $localExists = ($LASTEXITCODE -eq 0)
     git show-ref --verify --quiet "refs/remotes/origin/$Branch"; $remoteExists = ($LASTEXITCODE -eq 0)
     if ($localExists -or $remoteExists) {
@@ -137,7 +143,7 @@ function Add-Worktree {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "created worktree '$dir' on branch '$Branch'" -ForegroundColor Green
         Test-WorktreeInit $mainRoot $path
-        Set-Location $path
+        Set-Location -LiteralPath $path
     }
     else { Write-Host 'git worktree add failed' -ForegroundColor Yellow }
 }
@@ -152,7 +158,7 @@ function Enter-BranchWorktree {
     $existing = Get-Worktrees | Where-Object { $_.Branch -eq $Branch } | Select-Object -First 1
     if ($existing) {
         Write-Host "'$Branch' already checked out in '$($existing.Name)'" -ForegroundColor Cyan
-        Set-Location $existing.Path; return
+        Set-Location -LiteralPath $existing.Path; return
     }
     git show-ref --verify --quiet "refs/heads/$Branch"; $localExists = ($LASTEXITCODE -eq 0)
     git show-ref --verify --quiet "refs/remotes/origin/$Branch"; $remoteExists = ($LASTEXITCODE -eq 0)
@@ -167,14 +173,14 @@ function Enter-BranchWorktree {
     }
     $dirName = if ($Dir) { $Dir } else { $Branch -replace '[/\\]', '-' }
     $path = Join-Path (Get-WorktreeParent $mainRoot) $dirName
-    if (Test-Path $path) { Write-Host "path already exists: $path" -ForegroundColor Red; return }
+    if (Test-Path -LiteralPath $path) { Write-Host "path already exists: $path" -ForegroundColor Red; return }
     if ($localExists) { git worktree add $path $Branch }
     else { git worktree add --track -b $Branch $path "origin/$Branch" }
     if ($LASTEXITCODE -eq 0) {
         $src = if ($localExists) { 'local' } else { 'origin' }
         Write-Host "checked out '$Branch' ($src) at $path" -ForegroundColor Green
         Test-WorktreeInit $mainRoot $path
-        Set-Location $path
+        Set-Location -LiteralPath $path
     }
     else { Write-Host 'git worktree add failed' -ForegroundColor Yellow }
 }
@@ -447,7 +453,7 @@ function Remove-PickedWorktree {
         return
     }
     Remove-Worktree $Worktree.Name
-    if (Test-Path $Worktree.Path) {
+    if (Test-Path -LiteralPath $Worktree.Path) {
         # git kept it: uncommitted edits, untracked files or a lock. Say what -Force costs.
         Write-Host 'still there - it holds uncommitted or untracked files, or it is locked' -ForegroundColor Yellow
         if ((Read-Host 'force-delete it, losing whatever was not committed? [y/N]').Trim().ToLower() -in 'y', 'yes') {
@@ -468,7 +474,7 @@ function Select-Worktree {
         $r = Show-WorktreePicker $all $filter | Select-Object -Last 1
         if (-not $r) { return }
         $filter = $r.Filter
-        if ($r.Action -eq 'open') { Set-Location $r.Worktree.Path; return }
+        if ($r.Action -eq 'open') { Set-Location -LiteralPath $r.Worktree.Path; return }
         if ($r.Action -ne 'remove') { return }
         Remove-PickedWorktree $r.Worktree   # then loop: the list is read fresh and redrawn
     }
@@ -584,7 +590,7 @@ function Read-WithCompletion {
             $sep = $buf.LastIndexOfAny([char[]]@(',', ' '))
             $head = $buf.Substring(0, $sep + 1)
             $tok = $buf.Substring($sep + 1)
-            if ($tabbed -ne $buf) { $hits = @($Candidates | Where-Object { $_ -like "$tok*" }); $hi = 0 }
+            if ($tabbed -ne $buf) { $hits = @($Candidates | Where-Object { Test-WtPrefix $_ $tok }); $hi = 0 }
             elseif ($hits.Count -gt 0) { $hi = ($hi + 1) % $hits.Count }
             if ($hits.Count -gt 0) {
                 $new = $head + $hits[$hi]
@@ -606,7 +612,7 @@ function Resolve-CleanSelection {
     $picked = @(); $missed = @()
     foreach ($tok in ($Line -split '[, ]+' | Where-Object { $_ })) {
         $hit = @($Doomed | Where-Object { $_.Name -eq $tok -or $_.Branch -eq $tok })
-        if (-not $hit) { $hit = @($Doomed | Where-Object { $_.Name -like "$tok*" -or $_.Branch -like "$tok*" }) }
+        if (-not $hit) { $hit = @($Doomed | Where-Object { (Test-WtPrefix $_.Name $tok) -or (Test-WtPrefix $_.Branch $tok) }) }
         if ($hit) { $picked += $hit } else { $missed += $tok }
     }
     if ($missed) { Write-Host "  not a candidate: $($missed -join ', ')" -ForegroundColor Yellow }
@@ -848,13 +854,13 @@ function wt {
         { $_ -in 'clean', 'prune' } { Clear-MergedWorktrees -Base $Arg -DryRun:$DryRun -Yes:$Yes -IncludeGone:$IncludeGone -KeepBranch:$KeepBranch -NoFetch:$NoFetch -Force:$Force -Orphans:$Orphans }
         default {
             $m = Resolve-Worktree $Command
-            if ($m) { Set-Location $m.Path } else { Write-Host "no worktree '$Command'" -ForegroundColor Yellow }
+            if ($m) { Set-Location -LiteralPath $m.Path } else { Write-Host "no worktree '$Command'" -ForegroundColor Yellow }
         }
     }
 }
 Register-ArgumentCompleter -CommandName wt -ParameterName Command -ScriptBlock {
     param($c, $p, $word)
-    @('list', 'add', 'checkout', 'rm', 'rename', 'clean', '--help') + (Get-Worktrees).Name | Where-Object { $_ -like "$word*" } | ForEach-Object {
+    @('list', 'add', 'checkout', 'rm', 'rename', 'clean', '--help') + (Get-Worktrees).Name | Where-Object { Test-WtPrefix $_ $word } | ForEach-Object {
         [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
     }
 }
@@ -867,7 +873,7 @@ Register-ArgumentCompleter -CommandName wt -ParameterName Arg -ScriptBlock {
         if ($bound['Command'] -ne 'add') { $names = $names | Where-Object { $_ -notin $taken } }
     }
     else { $names = (Get-Worktrees).Name }
-    $names | Where-Object { $_ -like "$word*" } | ForEach-Object {
+    $names | Where-Object { Test-WtPrefix $_ $word } | ForEach-Object {
         [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
     }
 }
