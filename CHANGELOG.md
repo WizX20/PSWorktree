@@ -10,6 +10,10 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 - fix: `wt clean` and `wt list` no longer lose their trailing columns (State/Dirty/Action, Head) when a long branch name fills the console; the branch is clipped first, then the name, like the picker already does
 
+### Changed
+
+- chore: document the `status/planned` and `status/in-progress` issue labels in CONTRIBUTING
+
 ## [1.0.2] - 2026-09-15
 
 ### Changed
