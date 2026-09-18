@@ -1,6 +1,6 @@
 @{
     RootModule        = 'PSWorktree.psm1'
-    ModuleVersion     = '1.0.2'
+    ModuleVersion     = '1.1.0'
     GUID              = '8a143b3e-9f1a-4613-aeb5-85994128ed15'
     Author            = 'WizX20'
     CompanyName       = 'WizX20'

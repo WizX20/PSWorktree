@@ -6,6 +6,10 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+### Added
+
+- feat: `wt clean` shows the disk space each candidate holds (Size column), what `-DryRun` would free, and the total it reclaimed - `node_modules`, `bin/`, `obj/` included (#11)
+
 ### Fixed
 
 - fix: `wt clean` and `wt list` no longer lose their trailing columns (State/Dirty/Action, Head) when a long branch name fills the console; the branch is clipped first, then the name, like the picker already does
