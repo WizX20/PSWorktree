@@ -21,6 +21,15 @@ If you can reproduce on the latest release from [Releases](https://github.com/Wi
 
 Open an issue describing the use case before writing code. Small fixes can go straight to a PR, but anything that changes what `clean` considers safe to delete, the picker's key handling, or where worktrees are created benefits from a short design discussion first so the PR doesn't bounce on that.
 
+### Issue labels
+
+New issues start as `triage`. After a first look they get a type — `bug`, `enhancement`, `documentation` or `maintenance` — and, once accepted, a status:
+
+- `status/planned` — accepted and on the list; no branch yet
+- `status/in-progress` — a branch or PR exists; the PR references the issue (`Fixes #123`) so it closes on merge
+
+An open issue without a status label is an idea, not a commitment. There is no "done" label: merging the PR closes the issue.
+
 ## Security issues
 
 Do **not** open a public issue for security-sensitive bugs. Use GitHub's [private security advisory](https://github.com/WizX20/PSWorktree/security/advisories/new) on this repo instead.
