@@ -6,6 +6,8 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-22
+
 ### Added
 
 - feat: `wt clean` shows the disk space each candidate holds (Size column), what `-DryRun` would free, and the total it reclaimed - `node_modules`, `bin/`, `obj/` included (#11)
