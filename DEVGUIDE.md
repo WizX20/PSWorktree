@@ -7,6 +7,7 @@ Contributor reference for PSWorktree (`wt`). End-user install and usage live in 
 ```
 src/PSWorktree/PSWorktree.psm1                the module: all helpers + the `wt` dispatcher + completers
 src/PSWorktree/PSWorktree.psd1                module manifest (ModuleVersion is the release version)
+src/PSWorktree/git-wt.ps1                     what the `git wt` alias runs (`wt install git` points it here)
 tests/PSWorktree.Tests.ps1            Pester 5+ suite; builds throwaway git repos under $TestDrive
 scripts/                      lint / test / pack / set-version / cut-changelog / dev-link
 bucket/psworktree.json                Scoop manifest; this repo doubles as the Scoop bucket
@@ -39,6 +40,7 @@ task help                   # print `wt --help` (the README quotes it verbatim)
 
 - Tests need **Pester 5+** (`Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck`) and lint needs **PSScriptAnalyzer** (`Install-Module PSScriptAnalyzer -Scope CurrentUser`). On CI both are installed on the fly when missing. The Pester 3.4 that ships with Windows cannot run the suite.
 - The suite creates a bare `origin` plus a clone per test, so `add`, `checkout`, `rename`, `rm` and every `clean` classification (merged / squashed / open / no-commits / orphan) run against real git. Private helpers are reached with `InModuleScope PSWorktree`.
+- `git wt` is tested for real too: those tests point `GIT_CONFIG_GLOBAL` at a throwaway file, register the alias, and run `git wt ...` as a child PowerShell - your own `~/.gitconfig` is never read or written. The profile tests mock `Get-WtProfilePath`, so `$PROFILE` is never touched either.
 - `wt` prints through `Write-Host`; tests capture it with `6>&1` (the `Get-WtOutput { wt ... }` helper). Call `wt` with real switches inside the block — splatting `'-Force'` as a string would bind it positionally.
 - The interactive picker and the `clean` menu read the console directly and are not under test; try them by hand in a repo with a few worktrees.
 
@@ -110,8 +112,9 @@ Scoop fetches release assets over unauthenticated HTTPS. `WizX20/PSWorktree` mus
 
 - Manifest: `bucket/psworktree.json`. The release workflow bumps `version`/`url`/`hash`; `checkver: github` + `autoupdate` let `scoop update` find new releases.
 - Users subscribe to the bucket straight from this repo: `scoop bucket add psworktree https://github.com/WizX20/PSWorktree`. The bucket name is a local alias for the repo URL — Scoop keys buckets by that alias, one repo each, so a second WizX20 project needs its own alias (ActionsMonitor's README uses `wizx20` for *its* repo). If the number of tools grows, the manifests belong together in one `WizX20/scoop-bucket` repo that the release workflows push into; until then, per-repo buckets keep each release self-contained.
-- `psmodule.name: PSWorktree` makes Scoop junction `~/scoop/modules/PSWorktree` to the install dir and put `~/scoop/modules` on the user's `PSModulePath` (registry). `post_install` then patches `PSModulePath` in the running process, appends a guarded `Import-Module PSWorktree` line to `$PROFILE.CurrentUserAllHosts` (once; `wt.exe` = Windows Terminal would otherwise shadow the function until something imports the module), and imports the module into the current session. `post_uninstall` unloads it and leaves the profile line, which is harmless thanks to `-ErrorAction SilentlyContinue`.
-- To try a manifest change before a release, test the hook script on its own: load `bucket/psworktree.json`, `[scriptblock]::Create($m.post_install -join "`r`n")`, and invoke it with `$dir`, `$global` and a throwaway `$PROFILE` object defined.
+- `psmodule.name: PSWorktree` makes Scoop junction `~/scoop/modules/PSWorktree` to the install dir and put `~/scoop/modules` on the user's `PSModulePath` (registry). `post_install` then patches `PSModulePath` in the running process and runs `wt install git` from `$dir` - Scoop's `current` junction, so the alias survives updates - which sets up `git wt` as a global git alias. It leaves the profile alone (the `wt` command is opt-in: `git wt install profile`), and unloads the module again unless the session had it loaded before. `post_uninstall` unloads it, removes the alias only when it points into `apps/psworktree/current`, and mentions a leftover profile line, which is harmless thanks to `-ErrorAction SilentlyContinue`. `scoop update` runs the old `post_uninstall` and then the new `post_install`, so the alias is back straight away.
+- Hook changes go live the moment they reach `main` - Scoop reads the manifest from the branch - but install the last *released* zip until the next release. Keep them working with that zip, or run `task release` right after the merge.
+- To try a manifest change before a release, test the hook script on its own: copy `src/PSWorktree/*` into a fake `<tmp>\scoop\apps\psworktree\current`, point `$env:GIT_CONFIG_GLOBAL` at a throwaway file, load `bucket/psworktree.json`, and invoke `[scriptblock]::Create($m.post_install -join "`r`n")` with `$dir`, `$global` and a throwaway `$PROFILE` object defined.
 
 ## winget
 

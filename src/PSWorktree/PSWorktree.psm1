@@ -1,7 +1,10 @@
 # PSWorktree - git worktree helper for PowerShell: list / cd / add / checkout / rm / rename / clean any
 # git worktree, the ones Claude Code creates under .claude/worktrees/ included.
 # Exports one command, `wt`, which must run in the caller's session (it cd's you around),
-# hence a module rather than an executable. Commands:
+# hence a module rather than an executable. It is reached two ways: as `git wt`, a global git
+# alias to git-wt.ps1 (the default install - any shell, but a child process, so it prints
+# where it would cd), and as the `wt` command itself once a profile imports the module.
+# Commands:
 #   wt                    interactive picker (up/down, ENTER cd, DEL remove, type to filter)
 #   wt list               static table (Cur/Name/Branch/Head)
 #   wt <name>             cd to worktree (exact or prefix match)
@@ -10,6 +13,10 @@
 #   wt rm <name> [-Force] remove worktree (refuses main/current)
 #   wt rename <old> <new> rename worktree locally (alias: wt mv)
 #   wt clean [base]       remove worktrees whose branch landed upstream (incl. squash-merges)
+#   wt install git|profile   set up `git wt` (global git alias) or the `wt` command (profile line)
+
+# Set by git-wt.ps1: running under `git wt`, in a child process of git.
+$script:ViaGit = $false
 function Get-Worktrees {
     $wts = @(); $wt = $null
     git worktree list --porcelain 2>$null | ForEach-Object {
@@ -45,6 +52,14 @@ function Resolve-Worktree {
     $m = $wts | Where-Object { $_.Name -eq $Name }
     if (-not $m) { $m = $wts | Where-Object { Test-WtPrefix $_.Name $Name } | Select-Object -First 1 }
     $m
+}
+function Set-WtLocation {
+    # Every "cd in" goes through here. Under `git wt` this is a child process of git, and no
+    # child can change its parent's directory - so say where to go instead.
+    param([string]$Path)
+    if (-not $script:ViaGit) { Set-Location -LiteralPath $Path; return }
+    Write-Host "cd `"$($Path.Replace('/', '\'))`"" -ForegroundColor Cyan
+    Write-Host "(git wt cannot change your shell's directory - the wt command can: git wt install profile)" -ForegroundColor DarkGray
 }
 function Remove-Worktree {
     param([string]$Name, [switch]$Force)
@@ -87,6 +102,11 @@ function Rename-Worktree {
     if (Test-Path -LiteralPath $newPath) { Write-Host "target already exists: $newPath" -ForegroundColor Red; return }
     $cur = (git rev-parse --show-toplevel 2>$null) -replace '\\', '/'
     $inside = ($mp -eq $cur)
+    if ($inside -and $script:ViaGit) {
+        # Your shell (and git, which started us) sit in it, and this process cannot move them out.
+        Write-Host "refusing: you are inside '$($m.Name)' and Windows cannot move a directory in use - cd out of it first (wt rename does that for you)" -ForegroundColor Red
+        return
+    }
     if ($inside) { Set-Location -LiteralPath (Split-Path $m.Path -Parent) }  # release dir so Windows can move it
     git worktree move $m.Path $newPath
     if ($LASTEXITCODE -eq 0) {
@@ -143,7 +163,7 @@ function Add-Worktree {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "created worktree '$dir' on branch '$Branch'" -ForegroundColor Green
         Test-WorktreeInit $mainRoot $path
-        Set-Location -LiteralPath $path
+        Set-WtLocation $path
     }
     else { Write-Host 'git worktree add failed' -ForegroundColor Yellow }
 }
@@ -158,7 +178,7 @@ function Enter-BranchWorktree {
     $existing = Get-Worktrees | Where-Object { $_.Branch -eq $Branch } | Select-Object -First 1
     if ($existing) {
         Write-Host "'$Branch' already checked out in '$($existing.Name)'" -ForegroundColor Cyan
-        Set-Location -LiteralPath $existing.Path; return
+        Set-WtLocation $existing.Path; return
     }
     git show-ref --verify --quiet "refs/heads/$Branch"; $localExists = ($LASTEXITCODE -eq 0)
     git show-ref --verify --quiet "refs/remotes/origin/$Branch"; $remoteExists = ($LASTEXITCODE -eq 0)
@@ -180,7 +200,7 @@ function Enter-BranchWorktree {
         $src = if ($localExists) { 'local' } else { 'origin' }
         Write-Host "checked out '$Branch' ($src) at $path" -ForegroundColor Green
         Test-WorktreeInit $mainRoot $path
-        Set-Location -LiteralPath $path
+        Set-WtLocation $path
     }
     else { Write-Host 'git worktree add failed' -ForegroundColor Yellow }
 }
@@ -474,7 +494,7 @@ function Select-Worktree {
         $r = Show-WorktreePicker $all $filter | Select-Object -Last 1
         if (-not $r) { return }
         $filter = $r.Filter
-        if ($r.Action -eq 'open') { Set-Location -LiteralPath $r.Worktree.Path; return }
+        if ($r.Action -eq 'open') { Set-WtLocation $r.Worktree.Path; return }
         if ($r.Action -ne 'remove') { return }
         Remove-PickedWorktree $r.Worktree   # then loop: the list is read fresh and redrawn
     }
@@ -775,9 +795,110 @@ function Clear-MergedWorktrees {
     git worktree prune
     Write-Host "cleaned $removed of $($doomed.Count) $what, reclaimed $(Format-WtSize $freed)" -ForegroundColor Green
 }
+function Get-WtGitAlias {
+    # What `git wt` runs. git hands a '!' alias to its sh with the arguments appended, and -File
+    # passes them on to git-wt.ps1 one by one, switches intact. The path sits in single quotes:
+    # sh then takes spaces, '&' or '$' in it literally, and nothing needs the double quotes that
+    # Windows PowerShell 5.1 would mangle on the way into git.exe.
+    param([string]$Root = $PSScriptRoot)
+    $exe = if (Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
+    $file = (ConvertTo-Slash (Join-Path $Root 'git-wt.ps1')).Replace("'", "'\''")
+    "!$exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File '$file'"
+}
+function Install-WtGitAlias {
+    # Another tool's 'wt' alias is not ours to replace; an older one of ours (a moved
+    # install, or powershell.exe before pwsh arrived) is.
+    param([switch]$Force)
+    $want = Get-WtGitAlias
+    $have = (git config --global --get alias.wt) 2>$null
+    if ($have -ceq $want) { Write-Host "git wt is already set up: $want" -ForegroundColor DarkGray; return }
+    if ($have -and $have -notmatch 'git-wt\.ps1' -and -not $Force) {
+        Write-Host "refusing: the git alias 'wt' is taken - it runs: $have" -ForegroundColor Yellow
+        Write-Host '  replace it with: wt install git -Force' -ForegroundColor DarkGray
+        return
+    }
+    git config --global alias.wt $want
+    if ($LASTEXITCODE -ne 0) { Write-Host 'git config --global alias.wt failed' -ForegroundColor Red; return }
+    Write-Host "set up 'git wt' (git config --global alias.wt) - start with: git wt help" -ForegroundColor Green
+}
+function Uninstall-WtGitAlias {
+    $have = (git config --global --get alias.wt) 2>$null
+    if (-not $have) { Write-Host 'no git alias wt to remove' -ForegroundColor DarkGray; return }
+    if ($have -notmatch 'git-wt\.ps1') {
+        Write-Host "left alone: the git alias 'wt' is not PSWorktree's - it runs: $have" -ForegroundColor Yellow
+        return
+    }
+    git config --global --unset alias.wt
+    if ($LASTEXITCODE -eq 0) { Write-Host "removed 'git wt' (git config --global alias.wt)" -ForegroundColor Green }
+    else { Write-Host 'git config --global --unset alias.wt failed' -ForegroundColor Red }
+}
+# The profile line behind the `wt` command, and how to find it again - an older Scoop install
+# wrote the same import with another comment.
+$script:WtProfileLine = 'Import-Module PSWorktree -ErrorAction SilentlyContinue  # wt: git worktree helper (wt uninstall profile removes this)'
+$script:WtProfilePattern = '(?im)^[ \t]*Import-Module[ \t]+PSWorktree\b[^\n]*(\n|\z)'
+function Get-WtProfilePath { $PROFILE.CurrentUserAllHosts }
+function Read-WtProfile {
+    # The profile's text plus the encoding to write it back in. A BOM is kept (UTF-8, or the
+    # UTF-16 that Windows PowerShell's '>' leaves); without one the file goes through Latin-1,
+    # which maps every byte to itself, so UTF-8 and ANSI text alike come back untouched around
+    # the ASCII line wt adds or drops.
+    param([string]$Path)
+    $enc = [System.Text.Encoding]::GetEncoding(28591)
+    if (-not (Test-Path -LiteralPath $Path)) { return @{ Text = ''; Encoding = $enc } }
+    $reader = New-Object System.IO.StreamReader -ArgumentList $Path, $enc, $true
+    try { @{ Text = $reader.ReadToEnd(); Encoding = $reader.CurrentEncoding } }
+    finally { $reader.Dispose() }
+}
+function Test-WtModuleOnPath {
+    # The profile imports by name, which only works from a folder on PSModulePath. The user's
+    # registry value counts: Scoop extends that one, for shells started after the install.
+    $dirs = (@($env:PSModulePath, [Environment]::GetEnvironmentVariable('PSModulePath', 'User')) -join ';') -split ';'
+    foreach ($d in ($dirs | Where-Object { $_ })) {
+        if (Test-Path -LiteralPath (Join-Path $d 'PSWorktree')) { return $true }
+    }
+    $false
+}
+function Install-WtProfile {
+    $path = Get-WtProfilePath
+    $p = Read-WtProfile $path
+    if ($p.Text -match $script:WtProfilePattern) { Write-Host "the wt command is already in your profile: $path" -ForegroundColor DarkGray; return }
+    $text = $p.Text
+    if ($text -and -not $text.EndsWith("`n")) { $text += "`r`n" }
+    [System.IO.Directory]::CreateDirectory((Split-Path $path -Parent)) | Out-Null
+    [System.IO.File]::WriteAllText($path, $text + $script:WtProfileLine + "`r`n", $p.Encoding)
+    Write-Host "added the wt command to your profile: $path" -ForegroundColor Green
+    if (-not (Test-WtModuleOnPath)) {
+        Write-Host 'warning: PSWorktree is not in a PSModulePath folder, so that line will not find it - see Install in the README' -ForegroundColor Yellow
+    }
+    if ($script:ViaGit) { Write-Host 'new shells have it; for this one: Import-Module PSWorktree' -ForegroundColor DarkGray }
+}
+function Uninstall-WtProfile {
+    $path = Get-WtProfilePath
+    $p = Read-WtProfile $path
+    $text = [regex]::Replace($p.Text, $script:WtProfilePattern, '')
+    if ($text -ceq $p.Text) { Write-Host "no 'Import-Module PSWorktree' line in $path" -ForegroundColor DarkGray; return }
+    [System.IO.File]::WriteAllText($path, $text, $p.Encoding)
+    Write-Host "removed the wt command from your profile: $path" -ForegroundColor Green
+    if (-not $script:ViaGit) { Write-Host 'this shell keeps wt until it closes (or: Remove-Module PSWorktree)' -ForegroundColor DarkGray }
+}
+function Invoke-WtSetup {
+    param([string]$Verb, [string]$What, [switch]$Force)
+    switch ("$Verb $What") {
+        'install git' { Install-WtGitAlias -Force:$Force }
+        'install profile' { Install-WtProfile }
+        'uninstall git' { Uninstall-WtGitAlias }
+        'uninstall profile' { Uninstall-WtProfile }
+        default { Write-Host "usage: wt $Verb git|profile" -ForegroundColor Yellow }
+    }
+}
 function Show-WtHelp {
     @"
 wt - git worktree helper (works with git/Claude-created worktrees)
+
+Two ways in, same commands: 'git wt ...', a global git alias that works from any shell,
+and 'wt ...', the PowerShell command your profile can import ('git wt install profile').
+Only 'wt' can cd: git runs an alias in a child process, which cannot move your shell, so
+wherever the usage below says cd, 'git wt' prints the path instead.
 
 USAGE:
   wt                          interactive picker: Up/Down move, ENTER cd, DEL remove the
@@ -806,7 +927,11 @@ USAGE:
                       changes or untracked files
        -Orphans       also delete directories in the worktree dir that git no longer
                       knows about (leftovers of a half-finished removal)
-  wt --help | -h              show this help
+  wt install git [-Force]     set up 'git wt': a global git alias to this module
+  wt install profile          set up the 'wt' command: an Import-Module line in your
+                              PowerShell profile, so every new session has it
+  wt uninstall git|profile    take either one out again
+  wt help | -h | --help       show this help ('git wt --help' is answered by git itself)
 
 NOTES:
   - <name> is the worktree directory basename; Tab-completion is available.
@@ -836,6 +961,14 @@ NOTES:
     sum of the file sizes in that worktree (node_modules, bin/, obj/ included - what git
     ignores still takes up disk), junctions are not followed, and the closing line adds
     up only the removals that succeeded.
+  - 'git wt' runs git-wt.ps1 from the module folder in pwsh (powershell.exe when there is
+    no pwsh) without your profile. git starts it at the top of the worktree you are in.
+    'install git' will not replace a 'wt' alias of another tool unless -Force. Under
+    'git wt', rename refuses the worktree you are in: your shell holds that directory.
+  - 'install profile' writes `$PROFILE.CurrentUserAllHosts of the PowerShell running it -
+    via 'git wt' that is pwsh; from Windows PowerShell 5.1 run it as 'wt install profile'.
+    The line imports PSWorktree by name, so the module must sit on PSModulePath (Scoop,
+    'task link' and the manual install all put it there).
   - module: $PSScriptRoot
   - project: https://github.com/WizX20/PSWorktree
 "@ | Write-Host
@@ -852,21 +985,23 @@ function wt {
         { $_ -in 'rm', 'remove' } { Remove-Worktree $Arg -Force:$Force }
         { $_ -in 'rename', 'mv' } { Rename-Worktree $Arg $Arg2 }
         { $_ -in 'clean', 'prune' } { Clear-MergedWorktrees -Base $Arg -DryRun:$DryRun -Yes:$Yes -IncludeGone:$IncludeGone -KeepBranch:$KeepBranch -NoFetch:$NoFetch -Force:$Force -Orphans:$Orphans }
+        { $_ -in 'install', 'uninstall' } { Invoke-WtSetup $Command $Arg -Force:$Force }
         default {
             $m = Resolve-Worktree $Command
-            if ($m) { Set-Location -LiteralPath $m.Path } else { Write-Host "no worktree '$Command'" -ForegroundColor Yellow }
+            if ($m) { Set-WtLocation $m.Path } else { Write-Host "no worktree '$Command'" -ForegroundColor Yellow }
         }
     }
 }
 Register-ArgumentCompleter -CommandName wt -ParameterName Command -ScriptBlock {
     param($c, $p, $word)
-    @('list', 'add', 'checkout', 'rm', 'rename', 'clean', '--help') + (Get-Worktrees).Name | Where-Object { Test-WtPrefix $_ $word } | ForEach-Object {
+    @('list', 'add', 'checkout', 'rm', 'rename', 'clean', 'install', 'uninstall', '--help') + (Get-Worktrees).Name | Where-Object { Test-WtPrefix $_ $word } | ForEach-Object {
         [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
     }
 }
 Register-ArgumentCompleter -CommandName wt -ParameterName Arg -ScriptBlock {
     param($c, $p, $word, $ast, $bound)
-    if ($bound['Command'] -in 'add', 'checkout', 'co') {
+    if ($bound['Command'] -in 'install', 'uninstall') { $names = 'git', 'profile' }
+    elseif ($bound['Command'] -in 'add', 'checkout', 'co') {
         $taken = (Get-Worktrees).Branch
         $names = git for-each-ref --format='%(refname:short)' refs/heads refs/remotes 2>$null |
             Where-Object { $_ -ne 'origin/HEAD' } | ForEach-Object { $_ -replace '^origin/', '' } | Sort-Object -Unique

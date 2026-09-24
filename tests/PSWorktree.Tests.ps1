@@ -73,7 +73,8 @@ Describe 'module surface' {
 
     It 'help documents every command' {
         $help = Get-WtOutput { wt --help }
-        foreach ($cmd in 'wt list', 'wt add', 'wt checkout', 'wt rm', 'wt rename', 'wt clean', '-DryRun', '-Orphans') {
+        foreach ($cmd in 'wt list', 'wt add', 'wt checkout', 'wt rm', 'wt rename', 'wt clean', '-DryRun', '-Orphans',
+            'git wt', 'wt install git', 'wt install profile', 'wt uninstall') {
             $help | Should -Match ([regex]::Escape($cmd))
         }
     }
@@ -83,6 +84,8 @@ Describe 'module surface' {
         $c.CompletionMatches.CompletionText | Should -Contain 'list'
         $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt ', 3, $null)
         $c.CompletionMatches.CompletionText | Should -Contain 'clean'
+        $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt install ', 11, $null)
+        $c.CompletionMatches.CompletionText | Should -Be @('git', 'profile')
     }
 }
 
@@ -443,5 +446,147 @@ Describe 'clean' {
         $out = Get-WtOutput { wt clean -DryRun -Orphans }
         $out | Should -Match 'leftover\s+-\s+orphan\s+unregistered\s+0 B\s+remove \(directory only\)'
         $out | Should -Match 'dry run: would remove 4 worktree'
+    }
+}
+
+Describe 'git wt' {
+    # `wt install git` writes the global git config, so every test gets a throwaway one
+    # (GIT_CONFIG_GLOBAL, git 2.32+): the real ~/.gitconfig is neither read nor touched.
+    BeforeAll {
+        $script:RealGlobalConfig = $env:GIT_CONFIG_GLOBAL
+
+        function script:Invoke-GitWt {
+            # `git wt ...` through the real alias - a child pwsh or powershell - returning all
+            # it printed. Continue, for the same reason as Invoke-Git.
+            param([Parameter(ValueFromRemainingArguments)][string[]]$WtArgs)
+            $ErrorActionPreference = 'Continue'
+            (& git wt @WtArgs 2>&1 | Out-String)
+        }
+    }
+    BeforeEach {
+        $env:GIT_CONFIG_GLOBAL = Join-Path $TestDrive ('gitconfig-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:repo = New-TestRepo
+        Push-Location $script:repo
+    }
+    AfterEach {
+        Pop-Location
+        $env:GIT_CONFIG_GLOBAL = $script:RealGlobalConfig
+        InModuleScope PSWorktree { $script:ViaGit = $false }
+    }
+
+    It 'install git points a global alias at git-wt.ps1, and leaves it be the second time' {
+        Get-WtOutput { wt install git } | Should -Match "set up 'git wt'"
+        git config --global --get alias.wt |
+            Should -Match "^!(pwsh|powershell) -NoLogo -NoProfile -ExecutionPolicy Bypass -File '[^']+/src/PSWorktree/git-wt\.ps1'$"
+        Get-WtOutput { wt install git } | Should -Match 'already set up'
+    }
+
+    It 'install git keeps the wt alias of another tool unless -Force, and uninstall git never removes it' {
+        Invoke-Git config --global alias.wt 'worktree list'
+        Get-WtOutput { wt install git } | Should -Match 'refusing'
+        Get-WtOutput { wt uninstall git } | Should -Match 'not PSWorktree'
+        git config --global --get alias.wt | Should -Be 'worktree list'
+        Get-WtOutput { wt install git -Force } | Should -Match "set up 'git wt'"
+        Get-WtOutput { wt uninstall git } | Should -Match "removed 'git wt'"
+        git config --global --get alias.wt | Should -BeNullOrEmpty
+    }
+
+    It 'runs wt in a child process with the arguments and switches intact' {
+        Invoke-Git worktree add -b done (Join-Path $script:repo '.worktrees\done')   # never diverged: clean takes it
+        Get-WtOutput { wt install git } | Out-Null
+        $out = Invoke-GitWt clean -DryRun -NoFetch
+        $out | Should -Match 'dry run: would remove 1 worktree'
+        $out | Should -Not -Match 'fetching'
+        (git worktree list).Count | Should -Be 2
+        Invoke-GitWt help | Should -Match 'USAGE:'
+    }
+
+    It 'add creates the worktree and prints the way there; the calling shell stays put' {
+        Get-WtOutput { wt install git } | Out-Null
+        $out = Invoke-GitWt add feature/x
+        $out | Should -Match "created worktree 'feature-x'"
+        $out | Should -Match 'cd ".+\\\.worktrees\\feature-x"'
+        $out | Should -Match 'git wt install profile'
+        Test-Path -LiteralPath (Join-Path $script:repo '.worktrees\feature-x') | Should -BeTrue
+        (Get-Location).Path | Should -Be $script:repo
+    }
+
+    It 'survives a module path with spaces, an ampersand and a quote' {
+        # Documents often live in 'OneDrive - Contoso & Co', and a manual install sits below it.
+        $odd = Join-Path $TestDrive "it's a & b\PSWorktree"
+        New-Item -ItemType Directory -Path $odd -Force | Out-Null
+        Copy-Item -Path (Join-Path (Split-Path $script:ModulePath -Parent) '*') -Destination $odd
+        Invoke-Git config --global alias.wt (& (Get-Module PSWorktree) { param($r) Get-WtGitAlias $r } $odd)
+        Invoke-GitWt list | Should -Match '\*\s+repo\s+main'
+    }
+
+    It 'wt NAME and checkout print the path instead of moving' {
+        InModuleScope PSWorktree { $script:ViaGit = $true }
+        Get-WtOutput { wt add feature-y } | Should -Match 'cd ".+\\feature-y"'
+        (Get-Location).Path | Should -Be $script:repo
+        Get-WtOutput { wt feature-y } | Should -Match 'cd ".+\\feature-y"'
+        Get-WtOutput { wt co feature-y } | Should -Match '(?s)already checked out.+cd ".+\\feature-y"'
+        (Get-Location).Path | Should -Be $script:repo
+    }
+
+    It 'rename refuses the worktree you are in - your shell holds it - and renames the others' {
+        Get-WtOutput { wt add here } | Out-Null                   # still in-process: this cd's in
+        InModuleScope PSWorktree { $script:ViaGit = $true }
+        Get-WtOutput { wt rename here there } | Should -Match "refusing: you are inside 'here'"
+        Set-Location $script:repo
+        Get-WtOutput { wt rename here there } | Should -Match "renamed worktree 'here' -> 'there'"
+    }
+}
+
+Describe 'wt install profile' {
+    BeforeEach {
+        $script:profilePath = Join-Path $TestDrive ([guid]::NewGuid().ToString('N').Substring(0, 8) + '\profile.ps1')
+        Mock -ModuleName PSWorktree Get-WtProfilePath ([scriptblock]::Create("'$script:profilePath'"))
+    }
+
+    It 'adds the import line once, creating the profile and its folder when missing' {
+        Get-WtOutput { wt install profile } | Should -Match 'added the wt command'
+        Get-WtOutput { wt install profile } | Should -Match 'already in your profile'
+        $lines = @(Get-Content -LiteralPath $script:profilePath)
+        $lines.Count | Should -Be 1
+        $lines[0] | Should -Match '^Import-Module PSWorktree -ErrorAction SilentlyContinue\b'
+    }
+
+    It 'knows the line an older Scoop install wrote, and uninstall takes only that out' {
+        New-Item -ItemType Directory -Path (Split-Path $script:profilePath -Parent) | Out-Null
+        Set-Content -LiteralPath $script:profilePath -Value @(
+            'Import-Module posh-git',
+            '# Import-Module PSWorktree   (commented out: not ours to touch)',
+            'Import-Module PSWorktree -ErrorAction SilentlyContinue  # wt: git worktree helper (scoop install psworktree)',
+            'Set-Alias ll Get-ChildItem')
+        Get-WtOutput { wt install profile } | Should -Match 'already in your profile'
+        Get-WtOutput { wt uninstall profile } | Should -Match 'removed the wt command'
+        Get-Content -LiteralPath $script:profilePath |
+            Should -Be @('Import-Module posh-git', '# Import-Module PSWorktree   (commented out: not ours to touch)', 'Set-Alias ll Get-ChildItem')
+        Get-WtOutput { wt uninstall profile } | Should -Match "no 'Import-Module PSWorktree' line"
+    }
+
+    It 'leaves the rest of a <Name> profile as it was, byte for byte' -ForEach @(
+        @{ Name = 'UTF-8 with BOM'; Kind = 'utf8bom' }
+        @{ Name = 'UTF-8'; Kind = 'utf8' }
+        @{ Name = 'UTF-16'; Kind = 'utf16' }
+        @{ Name = 'ANSI'; Kind = 'ansi' }
+    ) {
+        $enc = switch ($Kind) {
+            'utf8bom' { New-Object System.Text.UTF8Encoding $true }
+            'utf8' { New-Object System.Text.UTF8Encoding $false }
+            'utf16' { [System.Text.Encoding]::Unicode }
+            'ansi' { [System.Text.Encoding]::GetEncoding(28591) }
+        }
+        # Non-ASCII on purpose: an UTF-8 round trip would mangle the ANSI byte, and a default
+        # write would drop the BOM or the UTF-16.
+        $text = "# caf$([char]0xE9) profile`r`nSet-Alias ll Get-ChildItem`r`n"
+        $before = [byte[]]($enc.GetPreamble() + $enc.GetBytes($text))
+        New-Item -ItemType Directory -Path (Split-Path $script:profilePath -Parent) | Out-Null
+        [IO.File]::WriteAllBytes($script:profilePath, $before)
+        Get-WtOutput { wt install profile } | Out-Null
+        [IO.File]::ReadAllText($script:profilePath, $enc) | Should -Match "caf$([char]0xE9) profile\r\nSet-Alias ll Get-ChildItem\r\nImport-Module PSWorktree"
+        Get-WtOutput { wt uninstall profile } | Should -Match 'removed the wt command'
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($script:profilePath)) | Should -Be ([Convert]::ToBase64String($before))
     }
 }

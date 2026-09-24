@@ -12,7 +12,7 @@
 [![CI](https://github.com/WizX20/PSWorktree/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/WizX20/PSWorktree/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/WizX20/PSWorktree?label=release)](https://github.com/WizX20/PSWorktree/releases/latest)
 
-A git worktree helper for PowerShell. One command, `wt`, gives you an interactive picker to jump between worktrees, plus `list`, `add`, `checkout`, `rename`, `rm` and a `clean` that knows which branches already landed upstream — squash-merges included.
+A git worktree helper for PowerShell. One command — `git wt` out of the box, or plain `wt` once you add it to your profile — gives you an interactive picker to jump between worktrees, plus `list`, `add`, `checkout`, `rename`, `rm` and a `clean` that knows which branches already landed upstream — squash-merges included.
 
 It understands the worktrees that **Claude Code** creates (`claude -w`, the `EnterWorktree` tool, `--worktree` sessions) under `<repo>/.claude/worktrees/`: they show up in the picker like any other worktree, `wt add` puts new ones in the same place, and `wt clean` sweeps them up once their PR is merged.
 
@@ -42,12 +42,33 @@ scoop install psworktree
 That is the whole setup. The install:
 
 1. drops the `PSWorktree` module in `~/scoop/modules/` and adds that folder to your `PSModulePath`;
-2. adds one line to your PowerShell profile (`$PROFILE.CurrentUserAllHosts`) — `Import-Module PSWorktree -ErrorAction SilentlyContinue  # wt: git worktree helper (scoop install psworktree)`;
-3. imports the module into the shell you ran `scoop install` from, so `wt` works **right away**, no restart.
+2. sets up **`git wt`**: a global git alias (`git config --global alias.wt`) that runs the module in a child PowerShell. It works **right away**, from any shell — PowerShell 7, Windows PowerShell, cmd, Git Bash.
 
-Step 2 is needed because `wt` is also the name of Windows Terminal's launcher (`wt.exe`): PowerShell prefers a function over an executable only once the function exists, so the module must be imported rather than left to auto-loading. Windows Terminal stays reachable as `wt.exe`.
+Your PowerShell profile is not touched. For plain `wt`, which can also cd, see [the `wt` command](#optional-the-wt-command) below.
 
-Update with `scoop update psworktree`.
+Update with `scoop update psworktree`; `scoop uninstall psworktree` takes the alias away again.
+
+Upgrading from 1.1 or older? Those versions put the `Import-Module PSWorktree` line in your profile themselves. It stays, so `wt` keeps working, and the update adds `git wt` next to it.
+
+### Optional: the `wt` command
+
+`git wt` has one limit: git runs an alias in a child process, and a child process cannot change the directory of the shell that started it. So where `wt` would cd — Enter in the picker, `add`, `checkout`, `wt <name>` — `git wt` prints the way there instead:
+
+```text
+cd "C:\src\app\.claude\worktrees\feature-login"
+```
+
+To actually jump around, add the `wt` command to your PowerShell profile:
+
+```powershell
+git wt install profile
+```
+
+That appends one line to `$PROFILE.CurrentUserAllHosts` — `Import-Module PSWorktree -ErrorAction SilentlyContinue  # wt: git worktree helper (wt uninstall profile removes this)` — so every new PowerShell session has `wt`; in the current one, run `Import-Module PSWorktree`. `git wt` keeps working alongside, and both take the same commands.
+
+- The profile is the one of the PowerShell that runs the command, and `git wt` uses PowerShell 7 when it is installed. To get `wt` in Windows PowerShell 5.1, run `Import-Module PSWorktree; wt install profile` from a 5.1 prompt.
+- Why a profile line rather than auto-loading: `wt` is also the name of Windows Terminal's launcher (`wt.exe`), and PowerShell prefers the function over the executable only once the module is imported. Windows Terminal stays reachable as `wt.exe`.
+- `wt uninstall profile` takes the line out again.
 
 ### Windows — winget
 
@@ -57,7 +78,15 @@ Coming later. Until then use Scoop or the manual install.
 
 1. Download `PSWorktree-<version>.zip` from [GitHub Releases](https://github.com/WizX20/PSWorktree/releases/latest).
 2. Extract the `PSWorktree` folder into a directory on your `PSModulePath` — for PowerShell 7 that is `$HOME\Documents\PowerShell\Modules\`, for Windows PowerShell 5.1 `$HOME\Documents\WindowsPowerShell\Modules\`.
-3. Add `Import-Module PSWorktree` to your profile (`notepad $PROFILE`).
+3. Set up `git wt`, [the `wt` command](#optional-the-wt-command), or both:
+
+   ```powershell
+   Import-Module PSWorktree
+   wt install git        # git wt: a global git alias to the folder you extracted to
+   wt install profile    # wt: an Import-Module line in your profile
+   ```
+
+   The alias names that folder; extract a new version somewhere else and run `wt install git` again.
 
 ### From a checkout
 
@@ -66,24 +95,32 @@ git clone https://github.com/WizX20/PSWorktree.git
 cd PSWorktree
 task link          # junctions src/PSWorktree into your CurrentUser module path
 Import-Module PSWorktree -Force
+wt install git     # optional: git wt, running this checkout
 ```
 
 ## Getting started
 
 ```powershell
-wt                       # pick a worktree: Up/Down, Enter to cd, Del to remove, type to filter
-wt add feature/login     # new branch + worktree, cd in
-wt co EDU-1234-fix       # existing branch (local or on origin) into a worktree, cd in
-wt list                  # who's where
-wt clean                 # remove worktrees whose branch already landed on origin/main|acceptance
+git wt                       # pick a worktree: Up/Down, Enter to go there, Del to remove, type to filter
+git wt add feature/login     # new branch + worktree
+git wt co EDU-1234-fix       # existing branch (local or on origin) into a worktree
+git wt list                  # who's where
+git wt clean                 # remove worktrees whose branch already landed on origin/main|acceptance
 ```
+
+With [the `wt` command](#optional-the-wt-command), drop the `git`: `wt add feature/login` also cd's you into the new worktree, and Enter in the picker takes you there. Help is `git wt help` — `git wt --help` is answered by git itself, with what the alias runs.
 
 `wt clean` ends in a menu rather than a blunt y/N: take everything, only the merged/squashed ones, only the never-diverged ones, only orphan directories, or pick by name with Tab completion. Nothing with uncommitted or untracked work is removed unless you say `-Force`, and `-Force` tells you what it is about to delete. Every candidate is measured first, so the table shows what each one holds, `-DryRun` says how much a clean would free, and the closing line reports what it reclaimed — `node_modules`, `bin/` and `obj/` included.
 
-## `wt --help`
+## Help: `git wt help`
 
 ```text
 wt - git worktree helper (works with git/Claude-created worktrees)
+
+Two ways in, same commands: 'git wt ...', a global git alias that works from any shell,
+and 'wt ...', the PowerShell command your profile can import ('git wt install profile').
+Only 'wt' can cd: git runs an alias in a child process, which cannot move your shell, so
+wherever the usage below says cd, 'git wt' prints the path instead.
 
 USAGE:
   wt                          interactive picker: Up/Down move, ENTER cd, DEL remove the
@@ -112,7 +149,11 @@ USAGE:
                       changes or untracked files
        -Orphans       also delete directories in the worktree dir that git no longer
                       knows about (leftovers of a half-finished removal)
-  wt --help | -h              show this help
+  wt install git [-Force]     set up 'git wt': a global git alias to this module
+  wt install profile          set up the 'wt' command: an Import-Module line in your
+                              PowerShell profile, so every new session has it
+  wt uninstall git|profile    take either one out again
+  wt help | -h | --help       show this help ('git wt --help' is answered by git itself)
 
 NOTES:
   - <name> is the worktree directory basename; Tab-completion is available.
@@ -142,6 +183,14 @@ NOTES:
     sum of the file sizes in that worktree (node_modules, bin/, obj/ included - what git
     ignores still takes up disk), junctions are not followed, and the closing line adds
     up only the removals that succeeded.
+  - 'git wt' runs git-wt.ps1 from the module folder in pwsh (powershell.exe when there is
+    no pwsh) without your profile. git starts it at the top of the worktree you are in.
+    'install git' will not replace a 'wt' alias of another tool unless -Force. Under
+    'git wt', rename refuses the worktree you are in: your shell holds that directory.
+  - 'install profile' writes $PROFILE.CurrentUserAllHosts of the PowerShell running it -
+    via 'git wt' that is pwsh; from Windows PowerShell 5.1 run it as 'wt install profile'.
+    The line imports PSWorktree by name, so the module must sit on PSModulePath (Scoop,
+    'task link' and the manual install all put it there).
   - module: C:\Users\you\scoop\apps\psworktree\current
   - project: https://github.com/WizX20/PSWorktree
 ```
@@ -158,8 +207,8 @@ Claude Code isolates parallel sessions in git worktrees under `<repo>/.claude/wo
 
 ## Uninstall
 
-- **Scoop:** `scoop uninstall psworktree`. The `Import-Module PSWorktree` line in your profile is harmless afterwards (it carries `-ErrorAction SilentlyContinue`); delete it when convenient.
-- **Manual:** delete the `PSWorktree` folder from your modules directory and remove the `Import-Module PSWorktree` line from your profile.
+- **Scoop:** `scoop uninstall psworktree` — the `git wt` alias goes with it. If you added the `wt` command, run `wt uninstall profile` first; a leftover `Import-Module PSWorktree` line is harmless (it carries `-ErrorAction SilentlyContinue`), so deleting it later is fine too.
+- **Manual:** `wt uninstall git` and `wt uninstall profile`, then delete the `PSWorktree` folder from your modules directory.
 
 ## Contributing
 

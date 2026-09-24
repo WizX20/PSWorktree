@@ -13,18 +13,20 @@
     "# The registry PSModulePath was just extended; this process still has the old value.",
     "$mods = if (Get-Command modulesdir -ErrorAction SilentlyContinue) { modulesdir $global } else { Join-Path (Split-Path (Split-Path (Split-Path $dir))) 'modules' }",
     "if (($env:PSModulePath -split ';') -notcontains $mods) { $env:PSModulePath = \"$mods;$env:PSModulePath\" }",
-    "# 'wt' is also Windows Terminal's launcher (wt.exe). PowerShell only prefers the function once the module",
-    "# is imported, so auto-loading cannot be relied on: import it from the profile, every session.",
-    "$profilePath = $PROFILE.CurrentUserAllHosts",
-    "$line = 'Import-Module PSWorktree -ErrorAction SilentlyContinue  # wt: git worktree helper (scoop install psworktree)'",
-    "if (-not (Test-Path $profilePath)) { New-Item -ItemType File -Path $profilePath -Force | Out-Null }",
-    "if (-not (Select-String -Path $profilePath -Pattern 'Import-Module\\s+PSWorktree\\b' -Quiet)) { Add-Content -Path $profilePath -Value $line; Write-Host \"Added 'Import-Module PSWorktree' to $profilePath\" }",
-    "# And make it available right now, no new shell needed.",
-    "Import-Module (Join-Path $dir 'PSWorktree.psd1') -Global -Force"
+    "# Set up 'git wt': a global git alias to git-wt.ps1 in $dir, the 'current' junction, so updates keep it",
+    "# valid. The module writes it (one tested place). The profile is left alone: 'git wt install profile'",
+    "# adds the wt command for those who want it, and a profile line from an older install keeps working.",
+    "$hadWt = [bool](Get-Module PSWorktree)",
+    "Import-Module (Join-Path $dir 'PSWorktree.psd1') -Global -Force",
+    "wt install git",
+    "if (-not $hadWt) { Remove-Module PSWorktree }"
   ],
   "post_uninstall": [
     "Remove-Module PSWorktree -Force -ErrorAction SilentlyContinue",
-    "Write-Host \"The 'Import-Module PSWorktree' line in $($PROFILE.CurrentUserAllHosts) is harmless now (-ErrorAction SilentlyContinue) - delete it when convenient.\""
+    "# Drop the 'git wt' alias if post_install set it (an update runs this, then sets it again).",
+    "if ((git config --global --get alias.wt) -match '/apps/psworktree/current/git-wt\\.ps1') { git config --global --unset alias.wt }",
+    "$profilePath = $PROFILE.CurrentUserAllHosts",
+    "if ((Test-Path $profilePath) -and (Select-String -Path $profilePath -Pattern 'Import-Module\\s+PSWorktree\\b' -Quiet)) { Write-Host \"Gone for good? The 'Import-Module PSWorktree' line in $profilePath can go too - harmless until then (-ErrorAction SilentlyContinue).\" }"
   ],
   "checkver": "github",
   "autoupdate": {
@@ -32,7 +34,8 @@
     "extract_dir": "PSWorktree"
   },
   "notes": [
-    "'wt' works in this shell already and in every new one (imported from your PowerShell profile).",
-    "Type 'wt --help' to start. Windows Terminal's own launcher is still reachable as 'wt.exe'."
+    "'git wt' works now, from any shell (a global git alias). Type 'git wt help' to start.",
+    "git runs an alias in a child process, so 'git wt' prints the path where it would cd. For cd, add the",
+    "wt command to your PowerShell profile: git wt install profile"
   ]
 }
