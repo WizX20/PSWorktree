@@ -6,6 +6,15 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+### Added
+
+- feat: `git wt` - a global git alias that runs `wt` from any shell (PowerShell 7, Windows PowerShell, cmd, Git Bash) without touching your PowerShell profile. A git alias runs in a child process, so where `wt` would cd, `git wt` prints the path
+- feat: `wt install git|profile` and `wt uninstall git|profile` set up or take out the `git wt` alias and the profile line behind the `wt` command; profile edits keep its encoding (BOM, UTF-16, ANSI) intact
+
+### Changed
+
+- The Scoop install sets up `git wt` instead of adding `Import-Module PSWorktree` to your profile; the `wt` command is now opt-in with `git wt install profile`. A profile line from an earlier install keeps working, and `scoop uninstall` now removes the alias too
+
 ## [1.1.0] - 2026-09-22
 
 ### Added

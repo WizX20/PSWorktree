@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-**PSWorktree** — a PowerShell module (`src/PSWorktree/`) exporting one command, `wt`: an interactive git worktree picker plus `list`/`add`/`checkout`/`rename`/`rm`/`clean`. It targets Windows, PowerShell 7 **and** Windows PowerShell 5.1, and knows the `.claude/worktrees/` layout Claude Code uses. Read [DEVGUIDE.md](DEVGUIDE.md) for layout, tests and the release pipeline; [CONTRIBUTING.md](CONTRIBUTING.md) for conventions.
+**PSWorktree** — a PowerShell module (`src/PSWorktree/`) exporting one command, `wt`: an interactive git worktree picker plus `list`/`add`/`checkout`/`rename`/`rm`/`clean`. Users reach it as `git wt` by default (a global git alias to `git-wt.ps1`, which runs in a child process and so prints paths instead of cd'ing — every cd goes through `Set-WtLocation`) and optionally as `wt` from their profile (`wt install profile`). It targets Windows, PowerShell 7 **and** Windows PowerShell 5.1, and knows the `.claude/worktrees/` layout Claude Code uses. Read [DEVGUIDE.md](DEVGUIDE.md) for layout, tests and the release pipeline; [CONTRIBUTING.md](CONTRIBUTING.md) for conventions.
 
 ## GitHub account — always WizX20
 
