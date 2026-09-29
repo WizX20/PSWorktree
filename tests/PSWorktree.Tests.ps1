@@ -96,17 +96,25 @@ Describe 'module surface' {
     }
 
     It 'tab-completes the sub-commands outside a repo too, not file names' {
-        # There Get-Worktrees has no names, and a $null completion used to throw.
+        # There Get-Worktrees has no names, and a $null completion used to throw. Under a
+        # global 'Stop' (a profile's, or the CI runner's), Windows PowerShell 5.1 also made
+        # git's "not a git repository" throw - set it here so every run checks that.
         $dir = Join-Path $TestDrive 'not-a-repo'
         New-Item -ItemType Directory -Path $dir | Out-Null
+        $savedPreference = $global:ErrorActionPreference
         Push-Location $dir
         try {
+            $global:ErrorActionPreference = 'Stop'
             $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt ', 3, $null)
             $c.CompletionMatches.CompletionText | Should -Contain 'clean'
             $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt rm ', 6, $null)
             $c.CompletionMatches.Count | Should -Be 0
+            { wt list 6>$null } | Should -Not -Throw
         }
-        finally { Pop-Location }
+        finally {
+            $global:ErrorActionPreference = $savedPreference
+            Pop-Location
+        }
     }
 }
 
@@ -194,6 +202,23 @@ Describe 'pure helpers' {
                 Get-WtBashrcPath | Should -Be 'C:\home\someone\.bashrc'
             }
             finally { $env:HOME = $saved }
+        }
+    }
+
+    It 'looks past a PSModulePath folder it may not read' {
+        # GitHub's Linux runner lists /root/.local/share/powershell/Modules; Test-Path throws there.
+        InModuleScope PSWorktree {
+            $saved = $env:PSModulePath
+            try {
+                New-Item -ItemType Directory -Path (Join-Path $TestDrive 'modules\PSWorktree') -Force | Out-Null
+                $env:PSModulePath = @((Join-Path $TestDrive 'unreadable'), (Join-Path $TestDrive 'modules')) -join [System.IO.Path]::PathSeparator
+                # Pester wants a default mock next to the filtered one: the real Test-Path, called
+                # as the cmdlet itself - by name it would find this mock again.
+                Mock Test-Path { & (Get-Command Test-Path -CommandType Cmdlet) -LiteralPath $LiteralPath }
+                Mock Test-Path { throw [System.UnauthorizedAccessException]::new('denied') } -ParameterFilter { $LiteralPath -like '*unreadable*' }
+                Test-WtModuleOnPath | Should -BeTrue
+            }
+            finally { $env:PSModulePath = $saved }
         }
     }
 

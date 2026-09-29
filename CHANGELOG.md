@@ -16,6 +16,7 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 ### Fixed
 
 - fix: `wt <Tab>` outside a git repo offers the sub-commands again instead of file names
+- fix: in Windows PowerShell 5.1 with `$ErrorActionPreference = 'Stop'` (in a profile, say), `wt` outside a git repo no longer throws git's "not a git repository" - the module keeps its own preference
 - fix: `wt` without a console to drive (output piped, or a terminal that gives native programs none) prints the table instead of failing in the picker
 
 ### Changed

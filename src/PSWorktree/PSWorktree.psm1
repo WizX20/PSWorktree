@@ -21,6 +21,10 @@
 $script:ViaGit = $false
 # Windows first; pwsh on Linux (WSL) works too. $IsWindows does not exist in Windows PowerShell 5.1.
 $script:OnWindows = [System.Environment]::OSVersion.Platform -eq 'Win32NT'
+# Module functions look preferences up here before the caller's global scope. Windows
+# PowerShell 5.1 turns git's stderr into errors even behind 2>$null, so a profile (or a test
+# runner) with 'Stop' would make every "not a git repository" throw.
+$ErrorActionPreference = 'Continue'
 function Get-Worktrees {
     $wts = @(); $wt = $null
     git worktree list --porcelain 2>$null | ForEach-Object {
@@ -875,7 +879,10 @@ function Test-WtModuleOnPath {
     $sep = [System.IO.Path]::PathSeparator
     $dirs = (@($env:PSModulePath, [Environment]::GetEnvironmentVariable('PSModulePath', 'User')) -join $sep) -split $sep
     foreach ($d in ($dirs | Where-Object { $_ })) {
-        if (Test-Path -LiteralPath (Join-Path $d 'PSWorktree')) { return $true }
+        # A folder we may not read says nothing either way. On Linux Test-Path throws there
+        # instead of answering (GitHub's runner lists root's module folder for its own user).
+        try { if (Test-Path -LiteralPath (Join-Path $d 'PSWorktree')) { return $true } }
+        catch { continue }
     }
     $false
 }
