@@ -6,6 +6,8 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-29
+
 ### Added
 
 - feat: `git wt` - a global git alias that runs `wt` from any shell (PowerShell 7, Windows PowerShell, cmd, Git Bash) without touching your PowerShell profile. A git alias runs in a child process, so where `wt` would cd, `git wt` prints the path
