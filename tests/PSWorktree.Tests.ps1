@@ -1,9 +1,16 @@
 # Pester 5+ suite for the PSWorktree module. Every git-backed test builds its own throwaway repo under
 # $TestDrive (a bare "origin" plus a clone), so nothing here touches a real repository and the
 # tests can run on a bare CI runner. `wt` prints through Write-Host, so output is captured by
-# redirecting the information stream (6>&1).
+# redirecting the information stream (6>&1). CI runs it on Windows (pwsh and 5.1) and on Linux
+# (pwsh), so paths are built with Join-Path and matched with [\\/].
+
+BeforeDiscovery {
+    # -Skip needs it while Pester is still collecting the tests; BeforeAll comes later.
+    $script:onWindows = [System.Environment]::OSVersion.Platform -eq 'Win32NT'
+}
 
 BeforeAll {
+    $script:onWindows = [System.Environment]::OSVersion.Platform -eq 'Win32NT'
     $script:ModulePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\PSWorktree\PSWorktree.psd1'
     Import-Module $script:ModulePath -Force
 
@@ -74,7 +81,7 @@ Describe 'module surface' {
     It 'help documents every command' {
         $help = Get-WtOutput { wt --help }
         foreach ($cmd in 'wt list', 'wt add', 'wt checkout', 'wt rm', 'wt rename', 'wt clean', '-DryRun', '-Orphans',
-            'git wt', 'wt install git', 'wt install profile', 'wt uninstall') {
+            'git wt', 'wt install git', 'wt install profile', 'wt install bash', 'wt uninstall', 'PSWORKTREE_CD_FILE') {
             $help | Should -Match ([regex]::Escape($cmd))
         }
     }
@@ -85,7 +92,29 @@ Describe 'module surface' {
         $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt ', 3, $null)
         $c.CompletionMatches.CompletionText | Should -Contain 'clean'
         $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt install ', 11, $null)
-        $c.CompletionMatches.CompletionText | Should -Be @('git', 'profile')
+        $c.CompletionMatches.CompletionText | Should -Be @('git', 'profile', 'bash')
+    }
+
+    It 'tab-completes the sub-commands outside a repo too, not file names' {
+        # There Get-Worktrees has no names, and a $null completion used to throw. Under a
+        # global 'Stop' (a profile's, or the CI runner's), Windows PowerShell 5.1 also made
+        # git's "not a git repository" throw - set it here so every run checks that.
+        $dir = Join-Path $TestDrive 'not-a-repo'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $savedPreference = $global:ErrorActionPreference
+        Push-Location $dir
+        try {
+            $global:ErrorActionPreference = 'Stop'
+            $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt ', 3, $null)
+            $c.CompletionMatches.CompletionText | Should -Contain 'clean'
+            $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt rm ', 6, $null)
+            $c.CompletionMatches.Count | Should -Be 0
+            { wt list 6>$null } | Should -Not -Throw
+        }
+        finally {
+            $global:ErrorActionPreference = $savedPreference
+            Pop-Location
+        }
     }
 }
 
@@ -147,7 +176,8 @@ Describe 'pure helpers' {
             $other = Join-Path $TestDrive 'elsewhere'
             New-Item -ItemType Directory -Path $other | Out-Null
             [IO.File]::WriteAllBytes((Join-Path $other 'big.bin'), (New-Object byte[] 5000))
-            New-Item -ItemType Junction -Path (Join-Path $root 'link') -Target $other | Out-Null
+            $link = if ($script:OnWindows) { 'Junction' } else { 'SymbolicLink' }
+            New-Item -ItemType $link -Path (Join-Path $root 'link') -Target $other | Out-Null
             Get-WtDirSize $root | Should -Be 1234
             Get-WtDirSize (Join-Path $root 'a') | Should -Be 234
             Get-WtDirSize (Join-Path $TestDrive 'does-not-exist') | Should -Be 0
@@ -159,6 +189,47 @@ Describe 'pure helpers' {
             ConvertTo-Slash 'C:\x\y' | Should -Be 'C:/x/y'
             ConvertTo-Slash '' | Should -Be ''
             ConvertTo-Slash $null | Should -Be ''
+        }
+    }
+
+    It 'reads a POSIX HOME from Git Bash as the Windows profile folder' -Skip:(-not $onWindows) {
+        InModuleScope PSWorktree {
+            $saved = $env:HOME
+            try {
+                $env:HOME = '/c/Users/someone'
+                Get-WtBashrcPath | Should -Be (Join-Path $HOME '.bashrc')
+                $env:HOME = 'C:\home\someone'
+                Get-WtBashrcPath | Should -Be 'C:\home\someone\.bashrc'
+            }
+            finally { $env:HOME = $saved }
+        }
+    }
+
+    It 'looks past a PSModulePath folder it may not read' {
+        # GitHub's Linux runner lists /root/.local/share/powershell/Modules; Test-Path throws there.
+        InModuleScope PSWorktree {
+            $saved = $env:PSModulePath
+            try {
+                New-Item -ItemType Directory -Path (Join-Path $TestDrive 'modules\PSWorktree') -Force | Out-Null
+                $env:PSModulePath = @((Join-Path $TestDrive 'unreadable'), (Join-Path $TestDrive 'modules')) -join [System.IO.Path]::PathSeparator
+                # Pester wants a default mock next to the filtered one: the real Test-Path, called
+                # as the cmdlet itself - by name it would find this mock again.
+                Mock Test-Path { & (Get-Command Test-Path -CommandType Cmdlet) -LiteralPath $LiteralPath }
+                Mock Test-Path { throw [System.UnauthorizedAccessException]::new('denied') } -ParameterFilter { $LiteralPath -like '*unreadable*' }
+                Test-WtModuleOnPath | Should -BeTrue
+            }
+            finally { $env:PSModulePath = $saved }
+        }
+    }
+
+    It 'native paths take backslashes on Windows only' {
+        InModuleScope PSWorktree {
+            # git's C:/x/y reads C:\x\y on Windows; turning /home/me into \home\me elsewhere
+            # would hand git a relative name.
+            $expected = if ($script:OnWindows) { 'C:\x\y' } else { 'C:/x/y' }
+            ConvertTo-NativePath 'C:/x/y' | Should -Be $expected
+            if (-not $script:OnWindows) { ConvertTo-NativePath '/home/me/repo' | Should -Be '/home/me/repo' }
+            ConvertTo-NativePath '' | Should -Be ''
         }
     }
 
@@ -505,7 +576,7 @@ Describe 'git wt' {
         Get-WtOutput { wt install git } | Out-Null
         $out = Invoke-GitWt add feature/x
         $out | Should -Match "created worktree 'feature-x'"
-        $out | Should -Match 'cd ".+\\\.worktrees\\feature-x"'
+        $out | Should -Match 'cd ".+[\\/]\.worktrees[\\/]feature-x"'
         $out | Should -Match 'git wt install profile'
         Test-Path -LiteralPath (Join-Path $script:repo '.worktrees\feature-x') | Should -BeTrue
         (Get-Location).Path | Should -Be $script:repo
@@ -522,10 +593,10 @@ Describe 'git wt' {
 
     It 'wt NAME and checkout print the path instead of moving' {
         InModuleScope PSWorktree { $script:ViaGit = $true }
-        Get-WtOutput { wt add feature-y } | Should -Match 'cd ".+\\feature-y"'
+        Get-WtOutput { wt add feature-y } | Should -Match 'cd ".+[\\/]feature-y"'
         (Get-Location).Path | Should -Be $script:repo
-        Get-WtOutput { wt feature-y } | Should -Match 'cd ".+\\feature-y"'
-        Get-WtOutput { wt co feature-y } | Should -Match '(?s)already checked out.+cd ".+\\feature-y"'
+        Get-WtOutput { wt feature-y } | Should -Match 'cd ".+[\\/]feature-y"'
+        Get-WtOutput { wt co feature-y } | Should -Match '(?s)already checked out.+cd ".+[\\/]feature-y"'
         (Get-Location).Path | Should -Be $script:repo
     }
 
@@ -535,6 +606,119 @@ Describe 'git wt' {
         Get-WtOutput { wt rename here there } | Should -Match "refusing: you are inside 'here'"
         Set-Location $script:repo
         Get-WtOutput { wt rename here there } | Should -Match "renamed worktree 'here' -> 'there'"
+    }
+
+    It 'hands the path to the file PSWORKTREE_CD_FILE names, and prints no cd line' {
+        InModuleScope PSWorktree { $script:ViaGit = $true }
+        $cdFile = Join-Path $TestDrive 'cd-target'
+        $env:PSWORKTREE_CD_FILE = $cdFile
+        try {
+            $out = Get-WtOutput { wt add feature-z }
+            $out | Should -Match "created worktree 'feature-z'"
+            $out | Should -Not -Match 'cd "|cannot change'
+            [IO.File]::ReadAllText($cdFile) | Should -Match '[\\/]\.worktrees[\\/]feature-z$'
+            (Get-Location).Path | Should -Be $script:repo
+        }
+        finally { Remove-Item Env:PSWORKTREE_CD_FILE }
+    }
+
+    It 'shows the table when there is no console for the picker (output piped)' {
+        Get-WtOutput { wt install git } | Out-Null
+        Invoke-GitWt | Should -Match 'Cur\s+Name\s+Branch\s+Head'
+    }
+}
+
+Describe 'wt install bash' {
+    BeforeAll { $script:RealGlobalConfig = $env:GIT_CONFIG_GLOBAL }
+    BeforeEach {
+        $env:GIT_CONFIG_GLOBAL = Join-Path $TestDrive ('gitconfig-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:rcPath = Join-Path $TestDrive ([guid]::NewGuid().ToString('N').Substring(0, 8) + '\.bashrc')
+        Mock -ModuleName PSWorktree Get-WtBashrcPath ([scriptblock]::Create("'$script:rcPath'"))
+        # Not wherever the suite was started: git refuses even --global config inside a
+        # checkout it cannot read (a Windows worktree seen from WSL, say).
+        Push-Location $TestDrive
+    }
+    AfterEach {
+        Pop-Location
+        $env:GIT_CONFIG_GLOBAL = $script:RealGlobalConfig
+    }
+
+    It 'adds one LF-ended line that sources wt.sh from the module folder, once' {
+        Get-WtOutput { wt install git } | Out-Null
+        $out = Get-WtOutput { wt install bash }
+        $out | Should -Match 'added the wt function'
+        $out | Should -Not -Match 'warning'
+        Get-WtOutput { wt install bash } | Should -Match 'already in'
+        $text = [IO.File]::ReadAllText($script:rcPath)
+        $text | Should -Match "^\[ -f '[^']+/src/PSWorktree/wt\.sh' \] && \. '[^']+/src/PSWorktree/wt\.sh'  # wt: git worktree helper \(wt uninstall bash removes this\)\n$"
+        $text | Should -Not -Match "`r"
+    }
+
+    It 'warns when git wt, which the function runs, is not set up' {
+        Get-WtOutput { wt install bash } | Should -Match 'warning: .+wt install git'
+    }
+
+    It 'points the line of an older install at this module, and uninstall leaves the rest as it was' {
+        New-Item -ItemType Directory -Path (Split-Path $script:rcPath -Parent) | Out-Null
+        $old = "[ -f '/old/place/wt.sh' ] && . '/old/place/wt.sh'  # wt: git worktree helper (wt uninstall bash removes this)"
+        [IO.File]::WriteAllText($script:rcPath, "export A=1`n$old`nalias ll='ls -l'`n")
+        Get-WtOutput { wt install bash } | Should -Match 'added the wt function'
+        $lines = [IO.File]::ReadAllText($script:rcPath) -split "`n"
+        $lines[0] | Should -Be 'export A=1'
+        $lines[1] | Should -Match '/src/PSWorktree/wt\.sh'
+        $lines[2] | Should -Be "alias ll='ls -l'"
+        Get-WtOutput { wt uninstall bash } | Should -Match 'removed the wt function'
+        [IO.File]::ReadAllText($script:rcPath) | Should -BeExactly "export A=1`nalias ll='ls -l'`n"
+        Get-WtOutput { wt uninstall bash } | Should -Match 'no wt line'
+    }
+
+}
+
+Describe 'bash function (wt.sh)' {
+    BeforeAll {
+        $script:RealGlobalConfig = $env:GIT_CONFIG_GLOBAL
+        # Git Bash on Windows: the bash.exe on PATH may well be WSL's launcher. git knows where
+        # its own installation is.
+        $script:bash = if ($onWindows) {
+            $gitRoot = Split-Path (Split-Path (Split-Path (git --exec-path) -Parent) -Parent) -Parent
+            @('bin\bash.exe', 'usr\bin\bash.exe') | ForEach-Object { Join-Path $gitRoot $_ } |
+                Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        }
+        else { (Get-Command bash -ErrorAction SilentlyContinue).Source }
+    }
+    BeforeEach {
+        $env:GIT_CONFIG_GLOBAL = Join-Path $TestDrive ('gitconfig-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:repo = New-TestRepo
+        Push-Location $script:repo
+        Get-WtOutput { wt install git } | Out-Null
+    }
+    AfterEach {
+        Pop-Location
+        $env:GIT_CONFIG_GLOBAL = $script:RealGlobalConfig
+    }
+
+    It 'cd''s the calling bash where git wt would, and stays put when there is nowhere to go' {
+        if (-not $script:bash) { Set-ItResult -Skipped -Because 'no bash found'; return }
+        # Each step prints where the shell is afterwards; git wt's own output goes to a log.
+        $steps = @(
+            '. "$1" || exit 1'
+            'cd "$2" || exit 1'
+            'wt add feature/b >>"$3" 2>&1; echo "add: $(basename "$(pwd)")"'
+            'cd "$2"; wt list >>"$3" 2>&1; echo "list: $(basename "$(pwd)")"'
+            'wt feature-b >>"$3" 2>&1; echo "name: $(basename "$(pwd)")"'
+            'wt --help 2>&1 | grep -q "USAGE:" && echo "help: ok"'
+        ) -join "`n"
+        $file = Join-Path $TestDrive 'wt-e2e.sh'
+        [IO.File]::WriteAllText($file, "$steps`n")                  # LF: bash reads a CR as part of the command
+        $wtsh = Join-Path (Split-Path $script:ModulePath -Parent) 'wt.sh'
+        $log = Join-Path $TestDrive 'wt-e2e.log'
+        $bashArgs = @($file, $wtsh, $script:repo, $log) | ForEach-Object { $_.Replace('\', '/') }
+        $ErrorActionPreference = 'Continue'                         # see Invoke-Git
+        $out = & $script:bash @bashArgs 2>&1 | Out-String
+        $out | Should -Match 'add: feature-b'
+        $out | Should -Match 'list: repo'
+        $out | Should -Match 'name: feature-b'
+        $out | Should -Match 'help: ok'
     }
 }
 

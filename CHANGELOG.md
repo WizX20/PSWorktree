@@ -12,6 +12,14 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 - feat: `git wt` - a global git alias that runs `wt` from any shell (PowerShell 7, Windows PowerShell, cmd, Git Bash) without touching your PowerShell profile. A git alias runs in a child process, so where `wt` would cd, `git wt` prints the path
 - feat: `wt install git|profile` and `wt uninstall git|profile` set up or take out the `git wt` alias and the profile line behind the `wt` command; profile edits keep its encoding (BOM, UTF-16, ANSI) intact
+- feat: `wt` in Git Bash - `git wt install bash` adds a `wt` function to `~/.bashrc` that runs `git wt` and then cd's where it would (the directory comes back through the file named in `PSWORKTREE_CD_FILE`, so the picker stays interactive); `wt uninstall bash` takes it out (#18)
+- feat: the module runs under PowerShell 7 on Linux, so WSL gets `git wt` and the bash function too; CI tests on Linux as well (#18)
+
+### Fixed
+
+- fix: `wt <Tab>` outside a git repo offers the sub-commands again instead of file names
+- fix: in Windows PowerShell 5.1 with `$ErrorActionPreference = 'Stop'` (in a profile, say), `wt` outside a git repo no longer throws git's "not a git repository" - the module keeps its own preference
+- fix: `wt` without a console to drive (output piped, or a terminal that gives native programs none) prints the table instead of failing in the picker
 
 ### Changed
 

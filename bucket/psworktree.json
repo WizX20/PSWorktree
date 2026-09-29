@@ -36,6 +36,6 @@
   "notes": [
     "'git wt' works now, from any shell (a global git alias). Type 'git wt help' to start.",
     "git runs an alias in a child process, so 'git wt' prints the path where it would cd. For cd, add the",
-    "wt command to your PowerShell profile: git wt install profile"
+    "wt command to your PowerShell profile: git wt install profile - or, in Git Bash: git wt install bash"
   ]
 }

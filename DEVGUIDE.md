@@ -8,10 +8,11 @@ Contributor reference for PSWorktree (`wt`). End-user install and usage live in 
 src/PSWorktree/PSWorktree.psm1                the module: all helpers + the `wt` dispatcher + completers
 src/PSWorktree/PSWorktree.psd1                module manifest (ModuleVersion is the release version)
 src/PSWorktree/git-wt.ps1                     what the `git wt` alias runs (`wt install git` points it here)
+src/PSWorktree/wt.sh                          the bash `wt` function (`wt install bash` sources it); LF only, see .gitattributes
 tests/PSWorktree.Tests.ps1            Pester 5+ suite; builds throwaway git repos under $TestDrive
 scripts/                      lint / test / pack / set-version / cut-changelog / dev-link
 bucket/psworktree.json                Scoop manifest; this repo doubles as the Scoop bucket
-.github/workflows/ci.yml      lint + test on pwsh and Windows PowerShell 5.1, then pack
+.github/workflows/ci.yml      lint + test on pwsh and Windows PowerShell 5.1, and on pwsh on Linux (WSL), then pack
 .github/workflows/release.yml manual release: stamp, test, pack, bump bucket, tag, GitHub Release
 .gitconfig                    maintainer-only: makes this clone talk to GitHub as WizX20
 Taskfile.yml                  `task --list`
@@ -40,7 +41,9 @@ task help                   # print `wt --help` (the README quotes it verbatim)
 
 - Tests need **Pester 5+** (`Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck`) and lint needs **PSScriptAnalyzer** (`Install-Module PSScriptAnalyzer -Scope CurrentUser`). On CI both are installed on the fly when missing. The Pester 3.4 that ships with Windows cannot run the suite.
 - The suite creates a bare `origin` plus a clone per test, so `add`, `checkout`, `rename`, `rm` and every `clean` classification (merged / squashed / open / no-commits / orphan) run against real git. Private helpers are reached with `InModuleScope PSWorktree`.
-- `git wt` is tested for real too: those tests point `GIT_CONFIG_GLOBAL` at a throwaway file, register the alias, and run `git wt ...` as a child PowerShell - your own `~/.gitconfig` is never read or written. The profile tests mock `Get-WtProfilePath`, so `$PROFILE` is never touched either.
+- `git wt` is tested for real too: those tests point `GIT_CONFIG_GLOBAL` at a throwaway file, register the alias, and run `git wt ...` as a child PowerShell - your own `~/.gitconfig` is never read or written. The profile tests mock `Get-WtProfilePath` and the bash ones `Get-WtBashrcPath`, so `$PROFILE` and `~/.bashrc` are never touched either.
+- The bash function is run for real as well: Git Bash on Windows (found through `git --exec-path`, since the `bash.exe` on `PATH` may be WSL's launcher), plain bash on Linux.
+- CI runs the suite on Linux too (pwsh, standing in for WSL). To try that locally, run `pwsh -File scripts/test.ps1` in a WSL distro with PowerShell 7. Run it from a clone on the Linux side: Linux git cannot read a Windows worktree under `/mnt/c`, because its gitdir holds a `C:/` path.
 - `wt` prints through `Write-Host`; tests capture it with `6>&1` (the `Get-WtOutput { wt ... }` helper). Call `wt` with real switches inside the block — splatting `'-Force'` as a string would bind it positionally.
 - The interactive picker and the `clean` menu read the console directly and are not under test; try them by hand in a repo with a few worktrees.
 

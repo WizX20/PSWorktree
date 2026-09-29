@@ -27,6 +27,7 @@ This project is licensed under the [Business Source License 1.1](LICENSE) (BUSL-
 - **Windows** 10 / 11
 - **PowerShell 7** (recommended) or **Windows PowerShell 5.1**
 - **git** 2.17 or newer on `PATH`
+- Optional, for [bash](#optional-wt-in-git-bash-and-wsl): Git Bash; or WSL with PowerShell 7 installed in the distro
 
 ## Install
 
@@ -70,6 +71,31 @@ That appends one line to `$PROFILE.CurrentUserAllHosts` — `Import-Module PSWor
 - Why a profile line rather than auto-loading: `wt` is also the name of Windows Terminal's launcher (`wt.exe`), and PowerShell prefers the function over the executable only once the module is imported. Windows Terminal stays reachable as `wt.exe`.
 - `wt uninstall profile` takes the line out again.
 
+### Optional: `wt` in Git Bash and WSL
+
+`git wt` already runs from Git Bash. For the cd as well, add the `wt` bash function:
+
+```bash
+git wt install bash
+source ~/.bashrc     # or open a new Git Bash
+```
+
+That appends one line to `~/.bashrc`, which sources `wt.sh` from the module folder. The function runs `git wt` with `PSWORKTREE_CD_FILE` pointing at a temp file; `git wt` leaves the directory it would cd into there instead of printing it, and the function cd's once it returns. The terminal is never captured, so the picker works as usual — `wt`, `wt add feature/login`, `wt co EDU-1234-fix`, `wt <name>` all take you there, and `wt --help` works too. `wt uninstall bash` takes the line out again. Using zsh? Copy that line into `~/.zshrc`.
+
+The picker needs a real console. Windows Terminal's Git Bash profile has one. The classic mintty window only has one when Git for Windows' pseudo-console support is on. Without a console, `wt` shows the `list` table instead.
+
+**WSL.** The module also runs under PowerShell 7 on Linux:
+
+1. [Install PowerShell](https://learn.microsoft.com/powershell/scripting/install/install-ubuntu) in the distro.
+2. Point it at the module. Either use the Windows copy (`/mnt/c/Users/<you>/scoop/apps/psworktree/current`), or extract the release zip into `~/.local/share/powershell/Modules/`.
+3. From WSL:
+
+   ```bash
+   pwsh -NoProfile -Command "Import-Module /mnt/c/Users/<you>/scoop/apps/psworktree/current/PSWorktree.psd1; wt install git; wt install bash"
+   ```
+
+That sets up `git wt` in WSL's own `~/.gitconfig` and the function in WSL's `~/.bashrc`. Keep those repos on the Linux side: a worktree made by Windows git records `C:/…` paths that Linux git cannot follow, and the other way round.
+
 ### Windows — winget
 
 Coming later. Until then use Scoop or the manual install.
@@ -108,7 +134,7 @@ git wt list                  # who's where
 git wt clean                 # remove worktrees whose branch already landed on origin/main|acceptance
 ```
 
-With [the `wt` command](#optional-the-wt-command), drop the `git`: `wt add feature/login` also cd's you into the new worktree, and Enter in the picker takes you there. Help is `git wt help` — `git wt --help` is answered by git itself, with what the alias runs.
+With [the `wt` command](#optional-the-wt-command) — or [the bash function](#optional-wt-in-git-bash-and-wsl) — drop the `git`: `wt add feature/login` also cd's you into the new worktree, and Enter in the picker takes you there. Help is `git wt help` — `git wt --help` is answered by git itself, with what the alias runs.
 
 `wt clean` ends in a menu rather than a blunt y/N: take everything, only the merged/squashed ones, only the never-diverged ones, only orphan directories, or pick by name with Tab completion. Nothing with uncommitted or untracked work is removed unless you say `-Force`, and `-Force` tells you what it is about to delete. Every candidate is measured first, so the table shows what each one holds, `-DryRun` says how much a clean would free, and the closing line reports what it reclaimed — `node_modules`, `bin/` and `obj/` included.
 
@@ -118,9 +144,10 @@ With [the `wt` command](#optional-the-wt-command), drop the `git`: `wt add featu
 wt - git worktree helper (works with git/Claude-created worktrees)
 
 Two ways in, same commands: 'git wt ...', a global git alias that works from any shell,
-and 'wt ...', the PowerShell command your profile can import ('git wt install profile').
-Only 'wt' can cd: git runs an alias in a child process, which cannot move your shell, so
-wherever the usage below says cd, 'git wt' prints the path instead.
+and 'wt ...', which also cd's - the PowerShell command your profile can import ('git wt
+install profile'), or the bash function for Git Bash and WSL ('git wt install bash').
+git runs an alias in a child process, which cannot move your shell, so wherever the usage
+below says cd, plain 'git wt' prints the path instead.
 
 USAGE:
   wt                          interactive picker: Up/Down move, ENTER cd, DEL remove the
@@ -152,7 +179,9 @@ USAGE:
   wt install git [-Force]     set up 'git wt': a global git alias to this module
   wt install profile          set up the 'wt' command: an Import-Module line in your
                               PowerShell profile, so every new session has it
-  wt uninstall git|profile    take either one out again
+  wt install bash             set up the 'wt' function for bash: a line in ~/.bashrc
+                              that sources wt.sh, which runs 'git wt' and cd's after it
+  wt uninstall git|profile|bash   take any of them out again
   wt help | -h | --help       show this help ('git wt --help' is answered by git itself)
 
 NOTES:
@@ -191,6 +220,12 @@ NOTES:
     via 'git wt' that is pwsh; from Windows PowerShell 5.1 run it as 'wt install profile'.
     The line imports PSWorktree by name, so the module must sit on PSModulePath (Scoop,
     'task link' and the manual install all put it there).
+  - 'install bash' writes ~/.bashrc; for zsh, copy that line into ~/.zshrc. The function
+    hands 'git wt' a file in PSWORKTREE_CD_FILE, 'git wt' leaves the directory there
+    instead of printing it, and the function cd's once it returns. 'wt --help' works.
+    WSL: install pwsh in the distro and run 'install git' and 'install bash' from there;
+    keep the repos on the Linux side - worktrees that Windows git made carry C:/ paths
+    Linux git cannot follow, and the other way round.
   - module: C:\Users\you\scoop\apps\psworktree\current
   - project: https://github.com/WizX20/PSWorktree
 ```
@@ -207,8 +242,8 @@ Claude Code isolates parallel sessions in git worktrees under `<repo>/.claude/wo
 
 ## Uninstall
 
-- **Scoop:** `scoop uninstall psworktree` — the `git wt` alias goes with it. If you added the `wt` command, run `wt uninstall profile` first; a leftover `Import-Module PSWorktree` line is harmless (it carries `-ErrorAction SilentlyContinue`), so deleting it later is fine too.
-- **Manual:** `wt uninstall git` and `wt uninstall profile`, then delete the `PSWorktree` folder from your modules directory.
+- **Scoop:** `scoop uninstall psworktree` — the `git wt` alias goes with it. If you added the `wt` command or the bash function, run `wt uninstall profile` / `wt uninstall bash` first. Leftovers are harmless, so deleting them later is fine too: the profile line carries `-ErrorAction SilentlyContinue`, and the `.bashrc` line checks that `wt.sh` still exists.
+- **Manual:** `wt uninstall git`, `wt uninstall profile` and `wt uninstall bash`, then delete the `PSWorktree` folder from your modules directory.
 
 ## Contributing
 
