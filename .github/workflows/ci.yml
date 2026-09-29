@@ -16,14 +16,19 @@ concurrency:
 
 jobs:
   test:
-    name: lint + test (${{ matrix.shell }})
-    runs-on: windows-latest
+    name: lint + test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         # The module declares PowerShellVersion 5.1: prove it on both editions. The step
         # `shell:` key takes no expressions, so the edition is invoked as a command instead.
-        shell: [pwsh, powershell]
+        # Linux stands in for WSL (pwsh in the distro, the bash function). The two Windows
+        # names are required checks in the main ruleset: keep them as they are.
+        include:
+          - { name: pwsh, os: windows-latest, shell: pwsh }
+          - { name: powershell, os: windows-latest, shell: powershell }
+          - { name: pwsh-linux, os: ubuntu-latest, shell: pwsh }
     steps:
       - uses: actions/checkout@v7
 
@@ -38,7 +43,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: test-results-${{ matrix.shell }}
+          name: test-results-${{ matrix.name }}
           path: dist/test-results.xml
 
   pack:

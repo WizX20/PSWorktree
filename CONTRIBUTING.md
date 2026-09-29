@@ -64,6 +64,7 @@ CI runs lint + tests on PowerShell 7 and Windows PowerShell 5.1 for every PR —
 
 - The module is a single file, `src/PSWorktree/PSWorktree.psm1`: private helpers first, `Show-WtHelp`, then the `wt` dispatcher and its argument completers at the bottom. Only `wt` is exported.
 - Must run on Windows PowerShell 5.1 as well as PowerShell 7: no ternaries, no `??`, no `-Parallel`, nothing that needs .NET Core.
+- Windows first, but PowerShell 7 on Linux (WSL) must keep working. No `\` in a path that reaches git or gets compared: use `Join-Path`, `ConvertTo-Slash` for comparisons and `ConvertTo-NativePath` for display. Windows-only tools such as robocopy go behind `$script:OnWindows`.
 - No dependencies beyond git and PowerShell. `wt` is meant to be one small module you can read in a sitting.
 - Console output goes through `Write-Host` with the existing colour conventions: green for done, yellow for refused/needs attention, red for errors, dark gray for hints.
 - Anything that deletes files must stay on the PowerShell/robocopy path (`Remove-WorktreePath`) — `git worktree remove` hits `MAX_PATH` on deep trees.

@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-**PSWorktree** — a PowerShell module (`src/PSWorktree/`) exporting one command, `wt`: an interactive git worktree picker plus `list`/`add`/`checkout`/`rename`/`rm`/`clean`. Users reach it as `git wt` by default (a global git alias to `git-wt.ps1`, which runs in a child process and so prints paths instead of cd'ing — every cd goes through `Set-WtLocation`) and optionally as `wt` from their profile (`wt install profile`). It targets Windows, PowerShell 7 **and** Windows PowerShell 5.1, and knows the `.claude/worktrees/` layout Claude Code uses. Read [DEVGUIDE.md](DEVGUIDE.md) for layout, tests and the release pipeline; [CONTRIBUTING.md](CONTRIBUTING.md) for conventions.
+**PSWorktree** — a PowerShell module (`src/PSWorktree/`) exporting one command, `wt`: an interactive git worktree picker plus `list`/`add`/`checkout`/`rename`/`rm`/`clean`. Users reach it as `git wt` by default (a global git alias to `git-wt.ps1`, which runs in a child process and so prints paths instead of cd'ing — every cd goes through `Set-WtLocation`) and optionally as `wt` from their profile (`wt install profile`) or as a bash function (`wt install bash` → `wt.sh`, which gets the cd target back through `PSWORKTREE_CD_FILE`). It targets Windows, PowerShell 7 **and** Windows PowerShell 5.1, and knows the `.claude/worktrees/` layout Claude Code uses. Read [DEVGUIDE.md](DEVGUIDE.md) for layout, tests and the release pipeline; [CONTRIBUTING.md](CONTRIBUTING.md) for conventions.
 
 ## GitHub account — always WizX20
 
@@ -30,6 +30,7 @@ task release [VERSION=x.y.z] # dispatch the Release workflow now; it also runs w
 
 - **Behaviour changes need a Pester test.** The suite builds real git repos per test (`New-TestRepo`); private helpers are reachable via `InModuleScope PSWorktree`. Call `wt` with real switches inside `Get-WtOutput { wt clean -DryRun }` — never splat `'-DryRun'` as a string, it binds positionally.
 - **5.1-compatible only**: no ternary, no `??`, no `.ForEach{}` on null, nothing .NET-Core-only.
+- **Linux pwsh too (WSL)**: CI also runs the suite on ubuntu. No `\` in paths handed to git or compared — `Join-Path`, `ConvertTo-Slash`, `ConvertTo-NativePath`; Windows-only tools behind `$script:OnWindows`. Test regexes match separators with `[\\/]`.
 - **Never delete through git** on Windows: `Remove-WorktreePath` (PowerShell → robocopy) exists because `git worktree remove` dies on `MAX_PATH`.
 - **Changelog**: add a line under `## [Unreleased]`; the release workflow stamps the version (an empty section falls back to commit subjects, so keep subjects readable). Do not touch released sections.
 - **Versions**: patch bumps are automatic. For a minor/major, raise `ModuleVersion` in `src/PSWorktree/PSWorktree.psd1` in the PR; the next release ships that version.

@@ -1,5 +1,8 @@
 # Normalise line endings in the repo; PowerShell reads either ending, so checkouts may differ.
 * text=auto
+# bash is not so forgiving: a CR ends up in the command. The release zip is packed on a Windows
+# runner, whose checkout would otherwise turn wt.sh into CRLF.
+*.sh text eol=lf
 
 *.png binary
 *.zip binary
