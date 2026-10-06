@@ -6,6 +6,12 @@ Write new entries under **Unreleased** — the Release workflow stamps the versi
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-06
+
+### Changed
+
+- feat: cd from git wt in Git Bash, and run under pwsh in WSL (#19)
+
 ## [1.2.0] - 2026-09-29
 
 ### Added
