@@ -97,9 +97,15 @@ When something fails on the way:
 - **The push is refused** (`main` moved while the release ran): the draft is deleted and nothing is published. Run the release again.
 - **Only publishing fails**: `main` and the tag are out, but the Scoop manifest on `main` points at a zip nobody can download until the draft is published. Publish it by hand with `git gh release edit vx.y.z --draft=false --latest`. Until you do, a release run on that commit stops with that command rather than reporting "nothing to release". Do not re-pack and upload a new zip: a rebuilt zip has another hash than the one the manifest carries. If the draft is gone, so is its zip — merge anything to `main` and release again.
 
-### First release
+### Repository setup
 
-`bucket/psworktree.json` ships with a placeholder hash until the first release has run; `scoop install psworktree` fails with a hash mismatch before that. Run `task release` once the repo is on GitHub and CI is green — it ships the manifest's `1.0.0`.
+Done once, before `1.0.0` (2026-09-11); kept as the checklist for a repository like this one:
+
+1. `WizX20/PSWorktree` is **public**: Scoop downloads release assets anonymously (see [Repo visibility](#repo-visibility)).
+2. The `PSWORKTREE_RELEASE_TOKEN` secret (below), with a dated `maintenance` issue to rotate it (#5).
+3. The ruleset `main` (below): pull requests only, squash merges only, the required checks listed there.
+4. The issue labels from [CONTRIBUTING.md](CONTRIBUTING.md#issue-labels) (`triage`, the types, `status/*`) plus `maintenance`, `dependencies` and `ci`.
+5. `task release` shipped the manifest's version; from then on the release workflow keeps `bucket/psworktree.json` in step. Before that first release the manifest carried a placeholder hash, and `scoop install` failed with a hash mismatch.
 
 ### Required secret: `PSWORKTREE_RELEASE_TOKEN`
 
