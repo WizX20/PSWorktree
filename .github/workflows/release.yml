@@ -167,7 +167,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/set-version.ps1 -Version $env:VERSION
-          # An empty "Unreleased" section falls back to the commit subjects since the last tag.
+          # changelog.d/ fragments + Unreleased lines; with neither, the commit subjects since the last tag.
           ./scripts/cut-changelog.ps1 -Version $env:VERSION -FallbackFromGit | Out-Null
           Get-Content dist/release-notes.md
 
@@ -210,7 +210,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/PSWorktree/PSWorktree.psd1 CHANGELOG.md bucket/psworktree.json
+          # -A stages the deletion of the changelog.d/ fragments cut-changelog folded in.
+          git add -A -- src/PSWorktree/PSWorktree.psd1 CHANGELOG.md bucket/psworktree.json changelog.d
           git commit -m "chore: release v$VERSION"
 
       # Order matters: the release exists as a draft, zip attached, before anything reaches main.
