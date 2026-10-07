@@ -18,6 +18,6 @@ if ($text -notmatch "(?m)^\s*ModuleVersion\s*=\s*'[^']*'") { throw "no ModuleVer
 $new = [regex]::Replace($text, "(?m)^(\s*ModuleVersion\s*=\s*')[^']*(')", "`${1}$Version`${2}")
 # Same version is fine: the first release ships the version the manifest already carries.
 if ($new -ne $text) { [IO.File]::WriteAllText($manifest, $new, [Text.UTF8Encoding]::new($false)) }
-$check = Test-ModuleManifest $manifest
-if ($check.Version.ToString() -ne $Version) { throw "manifest reads back as $($check.Version), expected $Version" }
+$check = (Import-PowerShellDataFile -LiteralPath $manifest).ModuleVersion
+if ($check -ne $Version) { throw "manifest reads back as $check, expected $Version" }
 Write-Host "PSWorktree.psd1 ModuleVersion = $Version" -ForegroundColor Green

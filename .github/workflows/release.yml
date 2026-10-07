@@ -55,7 +55,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          CURRENT=$(sed -n "s/^[[:space:]]*ModuleVersion[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" src/PSWorktree/PSWorktree.psd1)
+          # The manifest read the way PowerShell reads it, as pack.ps1 and set-version.ps1 do.
+          CURRENT=$(pwsh -NoProfile -NonInteractive -Command '(Import-PowerShellDataFile -LiteralPath src/PSWorktree/PSWorktree.psd1).ModuleVersion')
           LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
           echo "manifest version: $CURRENT; last release tag: ${LAST_TAG:-none}"
 
