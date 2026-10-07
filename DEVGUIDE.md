@@ -74,7 +74,7 @@ task release VERSION=1.1.0      # release now with an explicit version
 
 The `check` job decides first, on `main`:
 
-1. **Anything to release?** If `main` is exactly the commit of the latest `v*` tag, stop quietly (the weekly run is a no-op on a quiet week).
+1. **Anything to release?** If `main` is exactly the commit of the latest `v*` tag, stop quietly (the weekly run is a no-op on a quiet week) — unless that tag has no published GitHub Release: then fail, with the command that publishes its draft (see below).
 2. **Which version?** The dispatch input if given; else the manifest's `ModuleVersion` when no tag for it exists yet (first release, or a bump made in a PR); else the next patch of it. For a **minor/major** bump, raise `ModuleVersion` in `src/PSWorktree/PSWorktree.psd1` in your PR — the next release ships exactly that.
 3. **Validate** — plain `x.y.z`, no such tag yet, not below the manifest version.
 4. **Gate on CI** — the CI run of that exact commit must be `success`; while it runs, the job waits (up to 20 minutes). An API error, or no CI run after five minutes, refuses the release rather than letting it through: the release job only tests under PowerShell 7 on Windows, so passing without CI's verdict could ship a regression on Linux or Windows PowerShell 5.1.
