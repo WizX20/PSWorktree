@@ -25,6 +25,8 @@ jobs:
   test:
     name: lint + test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    # A hung analyzer or test run fails here, not after GitHub's 6-hour default.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +59,7 @@ jobs:
     name: pack module zip
     needs: test
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -72,6 +75,7 @@ jobs:
   token-expiry:
     name: release token expiry
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # Pull requests from forks carry no secrets: nothing to check there, and the job must not
     # block them. Everything else (own branches, pushes to main, the weekly run) gets the check.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

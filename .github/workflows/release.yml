@@ -28,6 +28,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Waits up to 20 minutes for CI on the commit to release, and up to 5 for that run to appear.
+    timeout-minutes: 30
     permissions:
       contents: read # the repository and its releases
       actions: read # the CI runs of the commit to release
@@ -144,6 +146,7 @@ jobs:
     needs: check
     if: needs.check.outputs.should_release == 'true'
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write # draft, publish or delete the GitHub Release (GITHUB_TOKEN)
     env:
