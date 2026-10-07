@@ -4,6 +4,11 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Weekly on main, the day before the Tuesday release: in a quiet week nothing else would run
+  # the release token expiry check (a failed scheduled run emails the maintainer), and it shows
+  # a runner image or a newly installed Pester/PSScriptAnalyzer breaking the build.
+  schedule:
+    - cron: "0 5 * * 1"
 
 permissions:
   contents: read
@@ -68,7 +73,7 @@ jobs:
     name: release token expiry
     runs-on: ubuntu-latest
     # Pull requests from forks carry no secrets: nothing to check there, and the job must not
-    # block them. Everything else (own branches, pushes to main) gets the check.
+    # block them. Everything else (own branches, pushes to main, the weekly run) gets the check.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
       SECRET_NAME: PSWORKTREE_RELEASE_TOKEN
