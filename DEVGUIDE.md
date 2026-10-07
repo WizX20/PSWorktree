@@ -23,12 +23,14 @@ Taskfile.yml                  `task --list`
 ## Running from source
 
 ```powershell
-task link                   # junction src/PSWorktree into your CurrentUser module path
+task link                   # link src/PSWorktree into your CurrentUser module path
 Import-Module PSWorktree -Force     # after every edit
-task unlink                 # remove the junction
+task unlink                 # remove the link
 ```
 
-Or skip the junction and load by path: `Import-Module ./src/PSWorktree -Force`.
+The link is a junction on Windows and a symbolic link on Linux (`~/.local/share/powershell/Modules`). Run `task link` again from another worktree and it points the link there, also when the old checkout is gone. `task link` runs under PowerShell 7, so the link lands in *its* module path (`Documents\PowerShell\Modules`); Windows PowerShell 5.1 reads `Documents\WindowsPowerShell\Modules` and does not see it. For 5.1, run the script under it as well: `powershell -File scripts/dev-link.ps1` (add `-Remove` to undo).
+
+Or skip the link and load by path: `Import-Module ./src/PSWorktree -Force`.
 
 Requires PowerShell 7 or Windows PowerShell 5.1, git, and [Task](https://taskfile.dev) for the `task` shortcuts (every task is a one-liner you can also run by hand).
 
