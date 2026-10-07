@@ -76,9 +76,14 @@ jobs:
     name: release token expiry
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Pull requests from forks carry no secrets: nothing to check there, and the job must not
-    # block them. Everything else (own branches, pushes to main, the weekly run) gets the check.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Pull requests from forks carry no secrets, and neither do Dependabot's (it only gets the
+    # separate Dependabot secrets): nothing to check there, and the job must not block them - a
+    # skipped job counts as passed for the required check. Everything else (own branches, pushes
+    # to main, the weekly run) gets the check.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login != 'dependabot[bot]')
     env:
       SECRET_NAME: PSWORKTREE_RELEASE_TOKEN
       WARN_DAYS: 30
