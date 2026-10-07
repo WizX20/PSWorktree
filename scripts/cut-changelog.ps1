@@ -30,7 +30,7 @@ Only validate the fragments in changelog.d/ and exit; changes nothing. The test 
 this on every pull request, so a misnamed fragment fails there instead of in the release.
 
 .PARAMETER Root
-The repository root. Tests point it at a throwaway copy.
+The repository root; defaults to the folder above scripts/. Tests point it at a throwaway copy.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Cut')]
 param(
@@ -39,9 +39,12 @@ param(
     [string]$Version,
     [Parameter(ParameterSetName = 'Cut')][switch]$FallbackFromGit,
     [Parameter(Mandatory, ParameterSetName = 'Check')][switch]$Check,
-    [string]$Root = (Split-Path $PSScriptRoot -Parent)
+    [string]$Root
 )
 $ErrorActionPreference = 'Stop'
+# Not a parameter default: under `powershell -File`, Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty while it binds parameters.
+if (-not $Root) { $Root = Split-Path $PSScriptRoot -Parent }
 
 # Keep a Changelog's sections, in its order; the key is how a fragment file spells it.
 $sections = [ordered]@{ added = 'Added'; changed = 'Changed'; deprecated = 'Deprecated'; removed = 'Removed'; fixed = 'Fixed'; security = 'Security' }

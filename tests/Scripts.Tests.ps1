@@ -72,4 +72,14 @@ Describe 'cut-changelog' {
         # Runs on every pull request, so a misnamed fragment fails here rather than in the release.
         { & $script:CutChangelog -Check 6>$null } | Should -Not -Throw
     }
+
+    It 'finds the repository on its own when run with -File' {
+        # A fresh process of this same edition: Windows PowerShell 5.1 binds parameters under
+        # -File before $PSScriptRoot is set, so a default derived from it came out empty.
+        $exe = (Get-Process -Id $PID).Path
+        $ErrorActionPreference = 'Continue'
+        $out = & $exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script:CutChangelog -Check 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0 -Because $out
+        $out | Should -Match 'all well-formed'
+    }
 }
