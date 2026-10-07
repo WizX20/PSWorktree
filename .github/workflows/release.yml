@@ -38,7 +38,7 @@ jobs:
       # this one, not whatever main is by then.
       sha: ${{ steps.decide.outputs.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
@@ -149,7 +149,7 @@ jobs:
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The commit the check job verified - main may have moved since (a merge while it
           # waited for CI). That commit is released or nothing is: the push below is refused
