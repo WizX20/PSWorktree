@@ -50,6 +50,7 @@ task help                   # print `wt --help` (the README quotes it verbatim)
 - CI runs the suite on Linux too (pwsh, standing in for WSL). To try that locally, run `pwsh -File scripts/test.ps1` in a WSL distro with PowerShell 7. Run it from a clone on the Linux side: Linux git cannot read a Windows worktree under `/mnt/c`, because its gitdir holds a `C:/` path.
 - `wt` prints through `Write-Host`; tests capture it with `6>&1` (the `Get-WtOutput { wt ... }` helper). Call `wt` with real switches inside the block — splatting `'-Force'` as a string would bind it positionally.
 - The interactive picker and the `clean` menu read the console directly and are not under test; try them by hand in a repo with a few worktrees.
+- When `task help` changes, paste it into the README's `git wt help` block. One line differs per machine: keep the Scoop path in `  - module: C:\Users\you\scoop\apps\psworktree\current` there. A test compares the two with that line normalised, so a help change without the README fails `task test`.
 
 ## GitHub account: everything as WizX20
 
