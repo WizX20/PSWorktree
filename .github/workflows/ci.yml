@@ -9,9 +9,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # Superseded PR pushes are cancelled; runs on main always finish, so the release gate never
-  # meets a 'cancelled' run for the commit it is about to ship.
+  # A pull request shares one group, so a newer push cancels the superseded run. Everything else
+  # gets a group per commit: GitHub cancels a *pending* run in a group when a newer one queues,
+  # even with cancel-in-progress off, so a shared group for main would cancel the middle run of
+  # three quick merges - and the release gate refuses a commit whose CI was cancelled.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
