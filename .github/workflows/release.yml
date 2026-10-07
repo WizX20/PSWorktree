@@ -5,7 +5,8 @@ name: Release
 # version; for a minor/major bump raise ModuleVersion in src/PSWorktree/PSWorktree.psd1 in
 # a PR (the next release uses it as-is), or dispatch with an explicit version.
 # One run: stamp version + CHANGELOG, lint + test, pack the zip, update the Scoop manifest
-# with the zip's hash, commit + tag on main, create the GitHub Release with the zip attached.
+# with the zip's hash, draft the GitHub Release with the zip attached, push commit + tag to
+# main, publish the draft.
 on:
   schedule:
     - cron: "0 6 * * 2"
@@ -17,8 +18,8 @@ on:
         type: string
         default: ""
 
-permissions:
-  contents: write
+# Nothing by default; each job asks for what it uses.
+permissions: {}
 
 concurrency:
   group: release
@@ -27,17 +28,30 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Waits up to 20 minutes for CI on the commit to release, and up to 5 for that run to appear.
+    timeout-minutes: 30
+    permissions:
+      contents: read # the repository and its releases
+      actions: read # the CI runs of the commit to release
     outputs:
       should_release: ${{ steps.decide.outputs.should_release }}
       version: ${{ steps.decide.outputs.version }}
+      # The commit this job decided on and waited for CI on. The release job builds exactly
+      # this one, not whatever main is by then.
+      sha: ${{ steps.decide.outputs.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Decide whether and what to release
         id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through the environment, never spliced into the script: the input is free text.
+          REQUESTED: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -46,13 +60,21 @@ jobs:
           echo "manifest version: $CURRENT; last release tag: ${LAST_TAG:-none}"
 
           if [ -n "$LAST_TAG" ] && [ "$(git rev-parse "$LAST_TAG^{commit}")" = "$(git rev-parse HEAD)" ]; then
+            # Unless the last run died between the push and publishing its draft: then main
+            # and the tag are out, but the Scoop manifest points at a zip nobody can download.
+            # A draft may not even be visible to this read-only token; missing or draft, the
+            # remedy is the same.
+            PUBLISHED=$(gh release view "$LAST_TAG" --json isDraft -q 'if .isDraft then "draft" else "yes" end' 2>/dev/null || true)
+            if [ "$PUBLISHED" != "yes" ]; then
+              echo "::error::main is exactly $LAST_TAG, but $LAST_TAG has no published GitHub Release - scoop install fails until it has one. Publish its draft: git gh release edit $LAST_TAG --draft=false --latest -R $GITHUB_REPOSITORY. If the draft is gone, its zip is too (a rebuilt zip has another hash): merge anything to main and release again."
+              exit 1
+            fi
             echo "main is exactly $LAST_TAG - nothing to release."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          REQUESTED='${{ inputs.version }}'
-          if [ -n "$REQUESTED" ]; then
+          if [ -n "${REQUESTED:-}" ]; then
             V="$REQUESTED"
           elif git rev-parse -q --verify "refs/tags/v$CURRENT" >/dev/null; then
             # The manifest version is already out: next patch.
@@ -69,9 +91,10 @@ jobs:
           HIGHEST=$(printf '%s\n%s\n' "$CURRENT" "$V" | sort -V | tail -1)
           if [ "$HIGHEST" != "$V" ]; then echo "$V is below the manifest version $CURRENT"; exit 1; fi
 
-          echo "releasing $V"
+          echo "releasing $V from $(git rev-parse HEAD)"
           echo "should_release=true" >> "$GITHUB_OUTPUT"
           echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Require the PSWORKTREE_RELEASE_TOKEN secret
         if: steps.decide.outputs.should_release == 'true'
@@ -90,16 +113,27 @@ jobs:
         if: steps.decide.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.decide.outputs.sha }}
         shell: bash
         run: |
           # Look at the CI run of the exact commit being released, not "the latest completed
           # run on main": after quick successive merges that one may be a superseded, cancelled
-          # run. Wait while the run for HEAD is still going (up to 20 minutes).
-          SHA=$(git rev-parse HEAD)
+          # run. Wait while the run for that commit is still going (up to 20 minutes).
+          # Strict both ways: an API error is no verdict, and neither is a missing run.
           for attempt in $(seq 1 40); do
-            RUN=$(gh run list -w ci.yml -c "$SHA" -L 1 --json status,conclusion -q '.[0] | "\(.status)/\(.conclusion)"' 2>/dev/null || echo "")
+            if ! RUN=$(gh run list -w ci.yml -c "$SHA" -L 1 --json status,conclusion -q '.[0] // empty | "\(.status)/\(.conclusion)"'); then
+              echo "::error::Could not list the CI runs of $SHA. Refusing to release without CI's verdict."
+              exit 1
+            fi
             case "$RUN" in
-              "") echo "No CI run for $SHA - allowing release through."; exit 0 ;;
+              "")
+                # GitHub registers a push's runs shortly after the push; a dispatch right after
+                # a merge can beat it. Give it five minutes, then refuse.
+                if [ "$attempt" -ge 10 ]; then
+                  echo "::error::No CI run for $SHA after 5 minutes. Refusing to release."
+                  exit 1
+                fi
+                echo "No CI run for $SHA yet - waiting..."; sleep 30 ;;
               completed/success) echo "CI for $SHA is success."; exit 0 ;;
               completed/*) echo "CI for $SHA ended as '${RUN#completed/}'. Refusing to release."; exit 1 ;;
               *) echo "CI for $SHA is $RUN - waiting..."; sleep 30 ;;
@@ -112,16 +146,22 @@ jobs:
     needs: check
     if: needs.check.outputs.should_release == 'true'
     runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # draft, publish or delete the GitHub Release (GITHUB_TOKEN)
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          # The commit the check job verified - main may have moved since (a merge while it
+          # waited for CI). That commit is released or nothing is: the push below is refused
+          # when main is no longer its parent.
+          ref: ${{ needs.check.outputs.sha }}
           fetch-depth: 0
-          # Pushed as the maintainer (fine-grained PAT, repository admin): the only actor that
-          # may bypass the pull-request rule on main. GITHUB_TOKEN cannot on a user-owned repo.
-          token: ${{ secrets.PSWORKTREE_RELEASE_TOKEN }}
+          # No credentials in .git/config: lint, tests and the modules they install run in
+          # this job, and none of them needs to push. Only the push step gets the token.
+          persist-credentials: false
 
       - name: Stamp version and changelog
         shell: pwsh
@@ -146,37 +186,92 @@ jobs:
           "hash=$($r.Sha256)" >> $env:GITHUB_OUTPUT
 
       - name: Update Scoop manifest
+        env:
+          HASH: ${{ steps.pack.outputs.hash }}
         shell: pwsh
         run: |
           $v = $env:VERSION
-          $hash = '${{ steps.pack.outputs.hash }}'
+          $hash = $env:HASH
+          $url = "https://github.com/WizX20/PSWorktree/releases/download/v$v/PSWorktree-$v.zip"
           $path = 'bucket/psworktree.json'
           $j = [IO.File]::ReadAllText($path)
           # In-place edits keep the file's formatting; the autoupdate url (v$version) is left alone.
           $j = $j -replace '"version":\s*"[^"]*"', "`"version`": `"$v`""
-          $j = $j -replace '"url":\s*"https://github\.com/WizX20/PSWorktree/releases/download/v\d[^"]*"', "`"url`": `"https://github.com/WizX20/PSWorktree/releases/download/v$v/PSWorktree-$v.zip`""
+          $j = $j -replace '"url":\s*"https://github\.com/WizX20/PSWorktree/releases/download/v\d[^"]*"', "`"url`": `"$url`""
           $j = $j -replace '"hash":\s*"[^"]*"', "`"hash`": `"$hash`""
           [IO.File]::WriteAllText($path, $j, [Text.UTF8Encoding]::new($false))
           $m = Get-Content $path -Raw | ConvertFrom-Json
-          if ($m.version -ne $v -or $m.hash -ne $hash) { throw 'manifest update did not take' }
+          # All three or the manifest is broken: a stale url with a new hash is a hash mismatch.
+          if ($m.version -ne $v -or $m.url -ne $url -or $m.hash -ne $hash) { throw 'manifest update did not take' }
           Get-Content $path
 
-      - name: Commit, tag and push
+      - name: Commit
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add src/PSWorktree/PSWorktree.psd1 CHANGELOG.md bucket/psworktree.json
           git commit -m "chore: release v$VERSION"
-          git tag -a "v$VERSION" -m "PSWorktree v$VERSION"
-          git push origin main "v$VERSION"
 
-      - name: Create GitHub release
+      # Order matters: the release exists as a draft, zip attached, before anything reaches main.
+      # Once the push lands, the Scoop manifest on main points at that zip; publishing the draft
+      # is then a single API call. A draft creates no tag, so a failed push leaves nothing behind
+      # but the draft, and the cleanup step below removes it.
+      - name: Draft the GitHub Release
+        id: draft
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "v$VERSION" \
+          set -euo pipefail
+          # A draft left by an earlier failed run would otherwise sit next to this one.
+          if [ "$(gh release view "v$VERSION" --json isDraft -q .isDraft 2>/dev/null || true)" = "true" ]; then
+            gh release delete "v$VERSION" --yes
+          fi
+          gh release create "v$VERSION" --draft \
             --title "PSWorktree v$VERSION" \
             --notes-file dist/release-notes.md \
             "dist/PSWorktree-$VERSION.zip"
+
+      - name: Tag and push
+        id: push
+        env:
+          # Pushed as the maintainer (fine-grained PAT, repository admin): the only actor that
+          # may bypass the pull-request rule on main. GITHUB_TOKEN cannot on a user-owned repo.
+          TOKEN: ${{ secrets.PSWORKTREE_RELEASE_TOKEN }}
+          GIT_TERMINAL_PROMPT: "0"
+          GCM_INTERACTIVE: never
+        shell: bash
+        run: |
+          git tag -a "v$VERSION" -m "PSWorktree v$VERSION"
+          # The token goes to this one git command as a header (what actions/checkout does with
+          # persist-credentials), never into .git/config.
+          AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\r\n')
+          echo "::add-mask::$AUTH"
+          # Atomic: the branch and the tag land together or not at all. A non-atomic push could
+          # leave the tag behind when main moved, and every later run would stop at "tag exists".
+          # The checkout is detached at the verified commit, so HEAD goes to main only when it
+          # still fast-forwards.
+          if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+              push --atomic origin "HEAD:refs/heads/main" "refs/tags/v$VERSION"; then
+            echo "::error::Push refused - main probably moved while the release ran. Nothing was published; run the release again."
+            exit 1
+          fi
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          # --latest explicitly: Scoop's checkver follows the latest release.
+          if ! gh release edit "v$VERSION" --draft=false --latest; then
+            echo "::error::main and tag v$VERSION are pushed, but publishing the draft failed - until it is published, scoop install fails. Publish it: git gh release edit v$VERSION --draft=false --latest -R $GITHUB_REPOSITORY"
+            exit 1
+          fi
+
+      - name: Remove the draft after a failed push
+        if: failure() && steps.draft.outcome == 'success' && steps.push.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release delete "v$VERSION" --yes

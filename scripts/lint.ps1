@@ -21,10 +21,26 @@ if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
     }
 }
 Import-Module PSScriptAnalyzer
+Write-Host "PSScriptAnalyzer $((Get-Module PSScriptAnalyzer).Version) on $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)" -ForegroundColor DarkGray
 
-$paths = @('src', 'scripts', 'tests') | ForEach-Object { Join-Path $root $_ }
-$findings = @($paths | ForEach-Object {
-        Invoke-ScriptAnalyzer -Path $_ -Recurse -Settings (Join-Path $root 'PSScriptAnalyzerSettings.psd1')
+$settings = Join-Path $root 'PSScriptAnalyzerSettings.psd1'
+$findings = @(foreach ($path in @('src', 'scripts', 'tests') | ForEach-Object { Join-Path $root $_ }) {
+        # PSScriptAnalyzer itself crashes now and then on the Linux runners ("Object reference not
+        # set to an instance of an object", "more than one dynamic module in each dynamic
+        # assembly"): a race in its parallel rule runs, not a finding about our code. A crash is
+        # retried; findings never are. Each attempt is collected whole, so a crash halfway
+        # through cannot report findings twice.
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                $result = @(Invoke-ScriptAnalyzer -Path $path -Recurse -Settings $settings -ErrorAction Stop)
+                break
+            }
+            catch {
+                if ($attempt -ge 3) { throw }
+                Write-Warning "PSScriptAnalyzer crashed on ${path} (attempt $attempt of 3): $($_.Exception.Message) - retrying"
+            }
+        }
+        $result
     })
 if ($findings) {
     $findings | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize -Wrap | Out-String -Width 200 | Write-Host

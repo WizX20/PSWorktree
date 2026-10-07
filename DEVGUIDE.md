@@ -74,21 +74,26 @@ task release VERSION=1.1.0      # release now with an explicit version
 
 The `check` job decides first, on `main`:
 
-1. **Anything to release?** If `main` is exactly the commit of the latest `v*` tag, stop quietly (the weekly run is a no-op on a quiet week).
+1. **Anything to release?** If `main` is exactly the commit of the latest `v*` tag, stop quietly (the weekly run is a no-op on a quiet week) — unless that tag has no published GitHub Release: then fail, with the command that publishes its draft (see below).
 2. **Which version?** The dispatch input if given; else the manifest's `ModuleVersion` when no tag for it exists yet (first release, or a bump made in a PR); else the next patch of it. For a **minor/major** bump, raise `ModuleVersion` in `src/PSWorktree/PSWorktree.psd1` in your PR — the next release ships exactly that.
 3. **Validate** — plain `x.y.z`, no such tag yet, not below the manifest version.
-4. **Gate on CI** — the latest completed CI run on `main` must be `success`.
+4. **Gate on CI** — the CI run of that exact commit must be `success`; while it runs, the job waits (up to 20 minutes). An API error, or no CI run after five minutes, refuses the release rather than letting it through: the release job only tests under PowerShell 7 on Windows, so passing without CI's verdict could ship a regression on Linux or Windows PowerShell 5.1.
 
-Then the `release` job:
+Then the `release` job, on the commit the `check` job verified — not whatever `main` is by then:
 
 5. **Stamp** — `scripts/set-version.ps1` writes `ModuleVersion`; `scripts/cut-changelog.ps1 -FallbackFromGit` turns `## [Unreleased]` into `## [x.y.z] - <date>` and extracts that section as the release notes. An empty section is filled from the commit subjects since the last tag, so write readable subjects even when you skip the changelog.
 6. **Lint + test** the stamped module.
 7. **Pack** — `scripts/pack.ps1` builds `dist/PSWorktree-x.y.z.zip` (top-level `PSWorktree/` folder with `PSWorktree.psd1`, `PSWorktree.psm1`, `LICENSE`, `NOTICE`) and prints its SHA256.
 8. **Bump the bucket** — `bucket/psworktree.json` gets the new `version`, `url` and `hash`, edited in place.
-9. **Commit + tag** `chore: release vx.y.z` on `main` (as `github-actions[bot]`), push with the `vx.y.z` tag.
-10. **GitHub Release** `vx.y.z` with the zip attached and the changelog section as body.
+9. **Commit** `chore: release vx.y.z` (as `github-actions[bot]`).
+10. **Draft the GitHub Release** `vx.y.z` with the zip attached and the changelog section as body — before anything reaches `main`.
+11. **Tag + push** `vx.y.z` and the commit to `main` atomically: branch and tag land together or not at all.
+12. **Publish** the draft as the latest release; from then on `scoop install` can download the zip.
 
-If step 10 fails after step 9 pushed, create the release by hand with `git gh release create vx.y.z dist/PSWorktree-x.y.z.zip` from a fresh checkout of the tag — the tag check in step 3 refuses a re-run.
+When something fails on the way:
+
+- **The push is refused** (`main` moved while the release ran): the draft is deleted and nothing is published. Run the release again.
+- **Only publishing fails**: `main` and the tag are out, but the Scoop manifest on `main` points at a zip nobody can download until the draft is published. Publish it by hand with `git gh release edit vx.y.z --draft=false --latest`. Until you do, a release run on that commit stops with that command rather than reporting "nothing to release". Do not re-pack and upload a new zip: a rebuilt zip has another hash than the one the manifest carries. If the draft is gone, so is its zip — merge anything to `main` and release again.
 
 ### First release
 
@@ -101,11 +106,11 @@ If step 10 fails after step 9 pushed, create the release by hand with `git gh re
 1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate. Resource owner `WizX20`, repository access: only `PSWorktree` (ActionsMonitor has its own token, `ACTIONSMONITOR_RELEASE_TOKEN`), permissions: **Contents: Read and write** (Metadata: Read is added automatically). Expiry: one year at most — note the date.
 2. `git gh secret set PSWORKTREE_RELEASE_TOKEN -R WizX20/PSWorktree` and paste the token.
 
-The `check` job fails early with a clear message when the secret is missing. CI's required **release token expiry** job reads the token's real expiry from the API (`GitHub-Authentication-Token-Expiration` header) on every PR and push: a warning 30 days out, a failure 14 days out — so an expiring token blocks merges until it is rotated, and no date has to be maintained by hand. A push with this token also triggers CI on `main` for the release commit — expected, one extra run per release. Without expiry the same can be done with a GitHub App added to the ruleset's bypass list; not worth it for one maintainer.
+Only the push step sees it, as a one-off header: neither checkout persists credentials, so lint, tests and the modules they install never run next to a token that may bypass the ruleset. The `check` job fails early with a clear message when the secret is missing. CI's required **release token expiry** job reads the token's real expiry from the API (`GitHub-Authentication-Token-Expiration` header) on every PR and push, and in a weekly scheduled CI run on Mondays (05:00 UTC, the day before the release): a warning 30 days out, a failure 14 days out, and a failure when the secret is missing — so an expiring token blocks merges until it is rotated, and no date has to be maintained by hand. A failed scheduled run emails the maintainer, so a quiet week no longer hides a lapsing token. GitHub disables scheduled workflows after 60 days without repository activity; in a stretch that quiet, the dated `maintenance` issue and GitHub's own expiry mail are the reminders left. A push with this token also triggers CI on `main` for the release commit — expected, one extra run per release. Without expiry the same can be done with a GitHub App added to the ruleset's bypass list; not worth it for one maintainer.
 
 ### Branch rules (ruleset `main`)
 
-Managed on GitHub: **Settings → Rules → Rulesets → main**. Pull request required, `squash` the only merge method, required checks `lint + test (pwsh)`, `lint + test (powershell)` and `pack module zip`, deletion and force-push blocked; bypass list: repository admin only. Direct pushes to `main` are therefore impossible for everyone but the owner, and a PR cannot be squash-merged before CI is green.
+Managed on GitHub: **Settings → Rules → Rulesets → main**. Pull request required, `squash` the only merge method, required checks `lint + test (pwsh)`, `lint + test (powershell)`, `lint + test (pwsh-linux)`, `pack module zip` and `release token expiry`, deletion and force-push blocked; bypass list: repository admin only. Direct pushes to `main` are therefore impossible for everyone but the owner, and a PR cannot be squash-merged before CI is green.
 
 ### Repo visibility
 

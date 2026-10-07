@@ -4,33 +4,42 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Weekly on main, the day before the Tuesday release: in a quiet week nothing else would run
+  # the release token expiry check (a failed scheduled run emails the maintainer), and it shows
+  # a runner image or a newly installed Pester/PSScriptAnalyzer breaking the build.
+  schedule:
+    - cron: "0 5 * * 1"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # Superseded PR pushes are cancelled; runs on main always finish, so the release gate never
-  # meets a 'cancelled' run for the commit it is about to ship.
+  # A pull request shares one group, so a newer push cancels the superseded run. Everything else
+  # gets a group per commit: GitHub cancels a *pending* run in a group when a newer one queues,
+  # even with cancel-in-progress off, so a shared group for main would cancel the middle run of
+  # three quick merges - and the release gate refuses a commit whose CI was cancelled.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     name: lint + test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    # A hung analyzer or test run fails here, not after GitHub's 6-hour default.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         # The module declares PowerShellVersion 5.1: prove it on both editions. The step
         # `shell:` key takes no expressions, so the edition is invoked as a command instead.
-        # Linux stands in for WSL (pwsh in the distro, the bash function). The two Windows
-        # names are required checks in the main ruleset: keep them as they are.
+        # Linux stands in for WSL (pwsh in the distro, the bash function). All three names are
+        # required checks in the main ruleset (DEVGUIDE.md -> Branch rules): keep them as they are.
         include:
           - { name: pwsh, os: windows-latest, shell: pwsh }
           - { name: powershell, os: windows-latest, shell: powershell }
           - { name: pwsh-linux, os: ubuntu-latest, shell: pwsh }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Lint (PSScriptAnalyzer)
         shell: bash
@@ -40,7 +49,7 @@ jobs:
         shell: bash
         run: ${{ matrix.shell }} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./scripts/test.ps1 -CI
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: test-results-${{ matrix.name }}
@@ -50,14 +59,15 @@ jobs:
     name: pack module zip
     needs: test
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Pack
         shell: pwsh
         run: ./scripts/pack.ps1
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: module-zip
           path: dist/PSWorktree-*.zip
@@ -65,9 +75,15 @@ jobs:
   token-expiry:
     name: release token expiry
     runs-on: ubuntu-latest
-    # Pull requests from forks carry no secrets: nothing to check there, and the job must not
-    # block them. Everything else (own branches, pushes to main) gets the check.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 5
+    # Pull requests from forks carry no secrets, and neither do Dependabot's (it only gets the
+    # separate Dependabot secrets): nothing to check there, and the job must not block them - a
+    # skipped job counts as passed for the required check. Everything else (own branches, pushes
+    # to main, the weekly run) gets the check.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login != 'dependabot[bot]')
     env:
       SECRET_NAME: PSWORKTREE_RELEASE_TOKEN
       WARN_DAYS: 30
