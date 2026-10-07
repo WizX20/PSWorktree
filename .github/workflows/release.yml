@@ -117,10 +117,21 @@ jobs:
           # Look at the CI run of the exact commit being released, not "the latest completed
           # run on main": after quick successive merges that one may be a superseded, cancelled
           # run. Wait while the run for that commit is still going (up to 20 minutes).
+          # Strict both ways: an API error is no verdict, and neither is a missing run.
           for attempt in $(seq 1 40); do
-            RUN=$(gh run list -w ci.yml -c "$SHA" -L 1 --json status,conclusion -q '.[0] | "\(.status)/\(.conclusion)"' 2>/dev/null || echo "")
+            if ! RUN=$(gh run list -w ci.yml -c "$SHA" -L 1 --json status,conclusion -q '.[0] // empty | "\(.status)/\(.conclusion)"'); then
+              echo "::error::Could not list the CI runs of $SHA. Refusing to release without CI's verdict."
+              exit 1
+            fi
             case "$RUN" in
-              "") echo "No CI run for $SHA - allowing release through."; exit 0 ;;
+              "")
+                # GitHub registers a push's runs shortly after the push; a dispatch right after
+                # a merge can beat it. Give it five minutes, then refuse.
+                if [ "$attempt" -ge 10 ]; then
+                  echo "::error::No CI run for $SHA after 5 minutes. Refusing to release."
+                  exit 1
+                fi
+                echo "No CI run for $SHA yet - waiting..."; sleep 30 ;;
               completed/success) echo "CI for $SHA is success."; exit 0 ;;
               completed/*) echo "CI for $SHA ended as '${RUN#completed/}'. Refusing to release."; exit 1 ;;
               *) echo "CI for $SHA is $RUN - waiting..."; sleep 30 ;;
