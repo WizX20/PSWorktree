@@ -5,7 +5,8 @@ name: Release
 # version; for a minor/major bump raise ModuleVersion in src/PSWorktree/PSWorktree.psd1 in
 # a PR (the next release uses it as-is), or dispatch with an explicit version.
 # One run: stamp version + CHANGELOG, lint + test, pack the zip, update the Scoop manifest
-# with the zip's hash, commit + tag on main, create the GitHub Release with the zip attached.
+# with the zip's hash, draft the GitHub Release with the zip attached, push commit + tag to
+# main, publish the draft.
 on:
   schedule:
     - cron: "0 6 * * 2"
@@ -41,6 +42,8 @@ jobs:
 
       - name: Decide whether and what to release
         id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -49,6 +52,15 @@ jobs:
           echo "manifest version: $CURRENT; last release tag: ${LAST_TAG:-none}"
 
           if [ -n "$LAST_TAG" ] && [ "$(git rev-parse "$LAST_TAG^{commit}")" = "$(git rev-parse HEAD)" ]; then
+            # Unless the last run died between the push and publishing its draft: then main
+            # and the tag are out, but the Scoop manifest points at a zip nobody can download.
+            # A draft may not even be visible to this read-only token; missing or draft, the
+            # remedy is the same.
+            PUBLISHED=$(gh release view "$LAST_TAG" --json isDraft -q 'if .isDraft then "draft" else "yes" end' 2>/dev/null || true)
+            if [ "$PUBLISHED" != "yes" ]; then
+              echo "::error::main is exactly $LAST_TAG, but $LAST_TAG has no published GitHub Release - scoop install fails until it has one. Publish its draft: git gh release edit $LAST_TAG --draft=false --latest -R $GITHUB_REPOSITORY. If the draft is gone, its zip is too (a rebuilt zip has another hash): merge anything to main and release again."
+              exit 1
+            fi
             echo "main is exactly $LAST_TAG - nothing to release."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -168,29 +180,62 @@ jobs:
           if ($m.version -ne $v -or $m.hash -ne $hash) { throw 'manifest update did not take' }
           Get-Content $path
 
-      - name: Commit, tag and push
+      - name: Commit
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add src/PSWorktree/PSWorktree.psd1 CHANGELOG.md bucket/psworktree.json
           git commit -m "chore: release v$VERSION"
+
+      # Order matters: the release exists as a draft, zip attached, before anything reaches main.
+      # Once the push lands, the Scoop manifest on main points at that zip; publishing the draft
+      # is then a single API call. A draft creates no tag, so a failed push leaves nothing behind
+      # but the draft, and the cleanup step below removes it.
+      - name: Draft the GitHub Release
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A draft left by an earlier failed run would otherwise sit next to this one.
+          if [ "$(gh release view "v$VERSION" --json isDraft -q .isDraft 2>/dev/null || true)" = "true" ]; then
+            gh release delete "v$VERSION" --yes
+          fi
+          gh release create "v$VERSION" --draft \
+            --title "PSWorktree v$VERSION" \
+            --notes-file dist/release-notes.md \
+            "dist/PSWorktree-$VERSION.zip"
+
+      - name: Tag and push
+        id: push
+        shell: bash
+        run: |
           git tag -a "v$VERSION" -m "PSWorktree v$VERSION"
           # Atomic: the branch and the tag land together or not at all. A non-atomic push could
           # leave the tag behind when main moved, and every later run would stop at "tag exists".
           # The checkout is detached at the verified commit, so HEAD goes to main only when it
           # still fast-forwards.
           if ! git push --atomic origin "HEAD:refs/heads/main" "refs/tags/v$VERSION"; then
-            echo "::error::Push refused - main probably moved while the release ran. Nothing was pushed; run the release again."
+            echo "::error::Push refused - main probably moved while the release ran. Nothing was published; run the release again."
             exit 1
           fi
 
-      - name: Create GitHub release
+      - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "v$VERSION" \
-            --title "PSWorktree v$VERSION" \
-            --notes-file dist/release-notes.md \
-            "dist/PSWorktree-$VERSION.zip"
+          # --latest explicitly: Scoop's checkver follows the latest release.
+          if ! gh release edit "v$VERSION" --draft=false --latest; then
+            echo "::error::main and tag v$VERSION are pushed, but publishing the draft failed - until it is published, scoop install fails. Publish it: git gh release edit v$VERSION --draft=false --latest -R $GITHUB_REPOSITORY"
+            exit 1
+          fi
+
+      - name: Remove the draft after a failed push
+        if: failure() && steps.draft.outcome == 'success' && steps.push.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release delete "v$VERSION" --yes

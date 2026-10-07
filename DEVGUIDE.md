@@ -85,10 +85,15 @@ Then the `release` job, on the commit the `check` job verified — not whatever 
 6. **Lint + test** the stamped module.
 7. **Pack** — `scripts/pack.ps1` builds `dist/PSWorktree-x.y.z.zip` (top-level `PSWorktree/` folder with `PSWorktree.psd1`, `PSWorktree.psm1`, `LICENSE`, `NOTICE`) and prints its SHA256.
 8. **Bump the bucket** — `bucket/psworktree.json` gets the new `version`, `url` and `hash`, edited in place.
-9. **Commit + tag** `chore: release vx.y.z` (as `github-actions[bot]`) with tag `vx.y.z`, pushed to `main` atomically: branch and tag land together or not at all. When `main` moved meanwhile, the push is refused and nothing lands — run the release again.
-10. **GitHub Release** `vx.y.z` with the zip attached and the changelog section as body.
+9. **Commit** `chore: release vx.y.z` (as `github-actions[bot]`).
+10. **Draft the GitHub Release** `vx.y.z` with the zip attached and the changelog section as body — before anything reaches `main`.
+11. **Tag + push** `vx.y.z` and the commit to `main` atomically: branch and tag land together or not at all.
+12. **Publish** the draft as the latest release; from then on `scoop install` can download the zip.
 
-If step 10 fails after step 9 pushed, create the release by hand with `git gh release create vx.y.z dist/PSWorktree-x.y.z.zip` from a fresh checkout of the tag — the tag check in step 3 refuses a re-run.
+When something fails on the way:
+
+- **The push is refused** (`main` moved while the release ran): the draft is deleted and nothing is published. Run the release again.
+- **Only publishing fails**: `main` and the tag are out, but the Scoop manifest on `main` points at a zip nobody can download until the draft is published. Publish it by hand with `git gh release edit vx.y.z --draft=false --latest`. Until you do, a release run on that commit stops with that command rather than reporting "nothing to release". Do not re-pack and upload a new zip: a rebuilt zip has another hash than the one the manifest carries. If the draft is gone, so is its zip — merge anything to `main` and release again.
 
 ### First release
 
