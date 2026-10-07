@@ -12,7 +12,7 @@ param(
     [string]$Version
 )
 $ErrorActionPreference = 'Stop'
-$manifest = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\PSWorktree\PSWorktree.psd1'
+$manifest = Join-Path (Split-Path $PSScriptRoot -Parent) 'src/PSWorktree/PSWorktree.psd1'
 $text = [IO.File]::ReadAllText($manifest)
 if ($text -notmatch "(?m)^\s*ModuleVersion\s*=\s*'[^']*'") { throw "no ModuleVersion line found in $manifest" }
 $new = [regex]::Replace($text, "(?m)^(\s*ModuleVersion\s*=\s*')[^']*(')", "`${1}$Version`${2}")
