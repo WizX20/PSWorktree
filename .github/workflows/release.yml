@@ -18,8 +18,8 @@ on:
         type: string
         default: ""
 
-permissions:
-  contents: write
+# Nothing by default; each job asks for what it uses.
+permissions: {}
 
 concurrency:
   group: release
@@ -28,6 +28,9 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # the repository and its releases
+      actions: read # the CI runs of the commit to release
     outputs:
       should_release: ${{ steps.decide.outputs.should_release }}
       version: ${{ steps.decide.outputs.version }}
@@ -39,6 +42,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Decide whether and what to release
         id: decide
@@ -128,6 +132,8 @@ jobs:
     needs: check
     if: needs.check.outputs.should_release == 'true'
     runs-on: windows-latest
+    permissions:
+      contents: write # draft, publish or delete the GitHub Release (GITHUB_TOKEN)
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
@@ -138,9 +144,9 @@ jobs:
           # when main is no longer its parent.
           ref: ${{ needs.check.outputs.sha }}
           fetch-depth: 0
-          # Pushed as the maintainer (fine-grained PAT, repository admin): the only actor that
-          # may bypass the pull-request rule on main. GITHUB_TOKEN cannot on a user-owned repo.
-          token: ${{ secrets.PSWORKTREE_RELEASE_TOKEN }}
+          # No credentials in .git/config: lint, tests and the modules they install run in
+          # this job, and none of them needs to push. Only the push step gets the token.
+          persist-credentials: false
 
       - name: Stamp version and changelog
         shell: pwsh
@@ -210,14 +216,25 @@ jobs:
 
       - name: Tag and push
         id: push
+        env:
+          # Pushed as the maintainer (fine-grained PAT, repository admin): the only actor that
+          # may bypass the pull-request rule on main. GITHUB_TOKEN cannot on a user-owned repo.
+          TOKEN: ${{ secrets.PSWORKTREE_RELEASE_TOKEN }}
+          GIT_TERMINAL_PROMPT: "0"
+          GCM_INTERACTIVE: never
         shell: bash
         run: |
           git tag -a "v$VERSION" -m "PSWorktree v$VERSION"
+          # The token goes to this one git command as a header (what actions/checkout does with
+          # persist-credentials), never into .git/config.
+          AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\r\n')
+          echo "::add-mask::$AUTH"
           # Atomic: the branch and the tag land together or not at all. A non-atomic push could
           # leave the tag behind when main moved, and every later run would stop at "tag exists".
           # The checkout is detached at the verified commit, so HEAD goes to main only when it
           # still fast-forwards.
-          if ! git push --atomic origin "HEAD:refs/heads/main" "refs/tags/v$VERSION"; then
+          if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+              push --atomic origin "HEAD:refs/heads/main" "refs/tags/v$VERSION"; then
             echo "::error::Push refused - main probably moved while the release ran. Nothing was published; run the release again."
             exit 1
           fi
