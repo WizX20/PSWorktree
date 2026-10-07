@@ -23,12 +23,14 @@ Taskfile.yml                  `task --list`
 ## Running from source
 
 ```powershell
-task link                   # junction src/PSWorktree into your CurrentUser module path
+task link                   # link src/PSWorktree into your CurrentUser module path
 Import-Module PSWorktree -Force     # after every edit
-task unlink                 # remove the junction
+task unlink                 # remove the link
 ```
 
-Or skip the junction and load by path: `Import-Module ./src/PSWorktree -Force`.
+The link is a junction on Windows and a symbolic link on Linux (`~/.local/share/powershell/Modules`). Run `task link` again from another worktree and it points the link there, also when the old checkout is gone. `task link` runs under PowerShell 7, so the link lands in *its* module path (`Documents\PowerShell\Modules`); Windows PowerShell 5.1 reads `Documents\WindowsPowerShell\Modules` and does not see it. For 5.1, run the script under it as well: `powershell -File scripts/dev-link.ps1` (add `-Remove` to undo).
+
+Or skip the link and load by path: `Import-Module ./src/PSWorktree -Force`.
 
 Requires PowerShell 7 or Windows PowerShell 5.1, git, and [Task](https://taskfile.dev) for the `task` shortcuts (every task is a one-liner you can also run by hand).
 
@@ -48,6 +50,7 @@ task help                   # print `wt --help` (the README quotes it verbatim)
 - CI runs the suite on Linux too (pwsh, standing in for WSL). To try that locally, run `pwsh -File scripts/test.ps1` in a WSL distro with PowerShell 7. Run it from a clone on the Linux side: Linux git cannot read a Windows worktree under `/mnt/c`, because its gitdir holds a `C:/` path.
 - `wt` prints through `Write-Host`; tests capture it with `6>&1` (the `Get-WtOutput { wt ... }` helper). Call `wt` with real switches inside the block — splatting `'-Force'` as a string would bind it positionally.
 - The interactive picker and the `clean` menu read the console directly and are not under test; try them by hand in a repo with a few worktrees.
+- When `task help` changes, paste it into the README's `git wt help` block. One line differs per machine: keep the Scoop path in `  - module: C:\Users\you\scoop\apps\psworktree\current` there. A test compares the two with that line normalised, so a help change without the README fails `task test`.
 
 ## GitHub account: everything as WizX20
 
@@ -97,9 +100,15 @@ When something fails on the way:
 - **The push is refused** (`main` moved while the release ran): the draft is deleted and nothing is published. Run the release again.
 - **Only publishing fails**: `main` and the tag are out, but the Scoop manifest on `main` points at a zip nobody can download until the draft is published. Publish it by hand with `git gh release edit vx.y.z --draft=false --latest`. Until you do, a release run on that commit stops with that command rather than reporting "nothing to release". Do not re-pack and upload a new zip: a rebuilt zip has another hash than the one the manifest carries. If the draft is gone, so is its zip — merge anything to `main` and release again.
 
-### First release
+### Repository setup
 
-`bucket/psworktree.json` ships with a placeholder hash until the first release has run; `scoop install psworktree` fails with a hash mismatch before that. Run `task release` once the repo is on GitHub and CI is green — it ships the manifest's `1.0.0`.
+Done once, before `1.0.0` (2026-09-11); kept as the checklist for a repository like this one:
+
+1. `WizX20/PSWorktree` is **public**: Scoop downloads release assets anonymously (see [Repo visibility](#repo-visibility)).
+2. The `PSWORKTREE_RELEASE_TOKEN` secret (below), with a dated `maintenance` issue to rotate it (#5).
+3. The ruleset `main` (below): pull requests only, squash merges only, the required checks listed there.
+4. The issue labels from [CONTRIBUTING.md](CONTRIBUTING.md#issue-labels) (`triage`, the types, `status/*`) plus `maintenance`, `dependencies` and `ci`.
+5. `task release` shipped the manifest's version; from then on the release workflow keeps `bucket/psworktree.json` in step. Before that first release the manifest carried a placeholder hash, and `scoop install` failed with a hash mismatch.
 
 ### Required secret: `PSWORKTREE_RELEASE_TOKEN`
 

@@ -86,6 +86,21 @@ Describe 'module surface' {
         }
     }
 
+    It 'help is quoted word for word in the README' {
+        # The README quotes `wt --help` (task help). One line differs per machine - the module
+        # folder - and shows a Scoop install path there.
+        $readme = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'README.md') -Raw
+        $quoted = [regex]::Match($readme, '(?s)## Help: `git wt help`\s*```text\r?\n(.*?)\r?\n```').Groups[1].Value
+        $quoted | Should -Not -BeNullOrEmpty
+        $normalise = {
+            param([string]$Text)
+            @($Text.TrimEnd() -split '\r?\n' | ForEach-Object {
+                    $_.TrimEnd() -replace '^(  - module: ).*', '$1<module>'
+                }) -join "`n"
+        }
+        (& $normalise (Get-WtOutput { wt --help })) | Should -Be (& $normalise $quoted)
+    }
+
     It 'tab-completes the sub-commands' {
         $c = [System.Management.Automation.CommandCompletion]::CompleteInput('wt li', 5, $null)
         $c.CompletionMatches.CompletionText | Should -Contain 'list'

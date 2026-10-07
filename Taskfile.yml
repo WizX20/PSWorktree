@@ -35,12 +35,12 @@ tasks:
       - '{{.PS}} -Command "Import-Module ./src/PSWorktree -Force; wt --help"'
 
   link:
-    desc: Dev install - junction src/PSWorktree into your CurrentUser module path (task unlink to undo)
+    desc: Dev install - link src/PSWorktree into the CurrentUser module path of pwsh (task unlink to undo)
     cmds:
       - '{{.PS}} -File scripts/dev-link.ps1'
 
   unlink:
-    desc: Remove the dev junction again
+    desc: Remove the dev link again
     cmds:
       - '{{.PS}} -File scripts/dev-link.ps1 -Remove'
 

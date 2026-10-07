@@ -13,20 +13,26 @@ Prints the zip path and its SHA256 (the value bucket/psworktree.json needs).
 param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$src = Join-Path $root 'src\PSWorktree'
-$version = (Test-ModuleManifest (Join-Path $src 'PSWorktree.psd1')).Version.ToString()
+$src = Join-Path $root 'src/PSWorktree'
+# Literal paths throughout: a checkout under a folder with [ or ] in its name would otherwise be
+# read as a wildcard pattern - an incomplete zip, or none. (Test-ModuleManifest has no
+# -LiteralPath, so the version is read as the data file it is.)
+$version = (Import-PowerShellDataFile -LiteralPath (Join-Path $src 'PSWorktree.psd1')).ModuleVersion
 
 $dist = Join-Path $root 'dist'
 $stage = Join-Path $dist 'PSWorktree'
-if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-Copy-Item (Join-Path $src '*') $stage
-Copy-Item (Join-Path $root 'LICENSE'), (Join-Path $root 'NOTICE') $stage
+Get-ChildItem -LiteralPath $src | Copy-Item -Destination $stage -Recurse
+Copy-Item -LiteralPath (Join-Path $root 'LICENSE'), (Join-Path $root 'NOTICE') -Destination $stage
 
 $zip = Join-Path $dist "PSWorktree-$version.zip"
-if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
-Compress-Archive -Path $stage -DestinationPath $zip
-$hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+# Not Compress-Archive: it reads -DestinationPath as a wildcard pattern. The base directory goes
+# in, so the zip holds one PSWorktree/ folder - what the manifest's extract_dir expects.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
+$hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
 Write-Host "packed $zip" -ForegroundColor Green
 Write-Host "sha256 $hash"
 [pscustomobject]@{ Version = $version; Zip = $zip; Sha256 = $hash }
