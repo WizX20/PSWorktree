@@ -79,13 +79,13 @@ The `check` job decides first, on `main`:
 3. **Validate** — plain `x.y.z`, no such tag yet, not below the manifest version.
 4. **Gate on CI** — the latest completed CI run on `main` must be `success`.
 
-Then the `release` job:
+Then the `release` job, on the commit the `check` job verified — not whatever `main` is by then:
 
 5. **Stamp** — `scripts/set-version.ps1` writes `ModuleVersion`; `scripts/cut-changelog.ps1 -FallbackFromGit` turns `## [Unreleased]` into `## [x.y.z] - <date>` and extracts that section as the release notes. An empty section is filled from the commit subjects since the last tag, so write readable subjects even when you skip the changelog.
 6. **Lint + test** the stamped module.
 7. **Pack** — `scripts/pack.ps1` builds `dist/PSWorktree-x.y.z.zip` (top-level `PSWorktree/` folder with `PSWorktree.psd1`, `PSWorktree.psm1`, `LICENSE`, `NOTICE`) and prints its SHA256.
 8. **Bump the bucket** — `bucket/psworktree.json` gets the new `version`, `url` and `hash`, edited in place.
-9. **Commit + tag** `chore: release vx.y.z` on `main` (as `github-actions[bot]`), push with the `vx.y.z` tag.
+9. **Commit + tag** `chore: release vx.y.z` (as `github-actions[bot]`) with tag `vx.y.z`, pushed to `main` atomically: branch and tag land together or not at all. When `main` moved meanwhile, the push is refused and nothing lands — run the release again.
 10. **GitHub Release** `vx.y.z` with the zip attached and the changelog section as body.
 
 If step 10 fails after step 9 pushed, create the release by hand with `git gh release create vx.y.z dist/PSWorktree-x.y.z.zip` from a fresh checkout of the tag — the tag check in step 3 refuses a re-run.

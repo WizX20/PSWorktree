@@ -30,6 +30,9 @@ jobs:
     outputs:
       should_release: ${{ steps.decide.outputs.should_release }}
       version: ${{ steps.decide.outputs.version }}
+      # The commit this job decided on and waited for CI on. The release job builds exactly
+      # this one, not whatever main is by then.
+      sha: ${{ steps.decide.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,9 +72,10 @@ jobs:
           HIGHEST=$(printf '%s\n%s\n' "$CURRENT" "$V" | sort -V | tail -1)
           if [ "$HIGHEST" != "$V" ]; then echo "$V is below the manifest version $CURRENT"; exit 1; fi
 
-          echo "releasing $V"
+          echo "releasing $V from $(git rev-parse HEAD)"
           echo "should_release=true" >> "$GITHUB_OUTPUT"
           echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Require the PSWORKTREE_RELEASE_TOKEN secret
         if: steps.decide.outputs.should_release == 'true'
@@ -90,12 +94,12 @@ jobs:
         if: steps.decide.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.decide.outputs.sha }}
         shell: bash
         run: |
           # Look at the CI run of the exact commit being released, not "the latest completed
           # run on main": after quick successive merges that one may be a superseded, cancelled
-          # run. Wait while the run for HEAD is still going (up to 20 minutes).
-          SHA=$(git rev-parse HEAD)
+          # run. Wait while the run for that commit is still going (up to 20 minutes).
           for attempt in $(seq 1 40); do
             RUN=$(gh run list -w ci.yml -c "$SHA" -L 1 --json status,conclusion -q '.[0] | "\(.status)/\(.conclusion)"' 2>/dev/null || echo "")
             case "$RUN" in
@@ -117,7 +121,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
+          # The commit the check job verified - main may have moved since (a merge while it
+          # waited for CI). That commit is released or nothing is: the push below is refused
+          # when main is no longer its parent.
+          ref: ${{ needs.check.outputs.sha }}
           fetch-depth: 0
           # Pushed as the maintainer (fine-grained PAT, repository admin): the only actor that
           # may bypass the pull-request rule on main. GITHUB_TOKEN cannot on a user-owned repo.
@@ -169,7 +176,14 @@ jobs:
           git add src/PSWorktree/PSWorktree.psd1 CHANGELOG.md bucket/psworktree.json
           git commit -m "chore: release v$VERSION"
           git tag -a "v$VERSION" -m "PSWorktree v$VERSION"
-          git push origin main "v$VERSION"
+          # Atomic: the branch and the tag land together or not at all. A non-atomic push could
+          # leave the tag behind when main moved, and every later run would stop at "tag exists".
+          # The checkout is detached at the verified commit, so HEAD goes to main only when it
+          # still fast-forwards.
+          if ! git push --atomic origin "HEAD:refs/heads/main" "refs/tags/v$VERSION"; then
+            echo "::error::Push refused - main probably moved while the release ran. Nothing was pushed; run the release again."
+            exit 1
+          fi
 
       - name: Create GitHub release
         env:
