@@ -110,7 +110,7 @@ Only the push step sees it, as a one-off header: neither checkout persists crede
 
 ### Branch rules (ruleset `main`)
 
-Managed on GitHub: **Settings → Rules → Rulesets → main**. Pull request required, `squash` the only merge method, required checks `lint + test (pwsh)`, `lint + test (powershell)` and `pack module zip`, deletion and force-push blocked; bypass list: repository admin only. Direct pushes to `main` are therefore impossible for everyone but the owner, and a PR cannot be squash-merged before CI is green.
+Managed on GitHub: **Settings → Rules → Rulesets → main**. Pull request required, `squash` the only merge method, required checks `lint + test (pwsh)`, `lint + test (powershell)`, `lint + test (pwsh-linux)`, `pack module zip` and `release token expiry`, deletion and force-push blocked; bypass list: repository admin only. Direct pushes to `main` are therefore impossible for everyone but the owner, and a PR cannot be squash-merged before CI is green.
 
 ### Repo visibility
 

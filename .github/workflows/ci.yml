@@ -32,8 +32,8 @@ jobs:
       matrix:
         # The module declares PowerShellVersion 5.1: prove it on both editions. The step
         # `shell:` key takes no expressions, so the edition is invoked as a command instead.
-        # Linux stands in for WSL (pwsh in the distro, the bash function). The two Windows
-        # names are required checks in the main ruleset: keep them as they are.
+        # Linux stands in for WSL (pwsh in the distro, the bash function). All three names are
+        # required checks in the main ruleset (DEVGUIDE.md -> Branch rules): keep them as they are.
         include:
           - { name: pwsh, os: windows-latest, shell: pwsh }
           - { name: powershell, os: windows-latest, shell: powershell }
