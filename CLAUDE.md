@@ -32,7 +32,7 @@ task release [VERSION=x.y.z] # dispatch the Release workflow now; it also runs w
 - **5.1-compatible only**: no ternary, no `??`, no `.ForEach{}` on null, nothing .NET-Core-only.
 - **Linux pwsh too (WSL)**: CI also runs the suite on ubuntu. No `\` in paths handed to git or compared — `Join-Path`, `ConvertTo-Slash`, `ConvertTo-NativePath`; Windows-only tools behind `$script:OnWindows`. Test regexes match separators with `[\\/]`.
 - **Never delete through git** on Windows: `Remove-WorktreePath` (PowerShell → robocopy) exists because `git worktree remove` dies on `MAX_PATH`.
-- **Changelog**: add a line under `## [Unreleased]`; the release workflow stamps the version (an empty section falls back to commit subjects, so keep subjects readable). Do not touch released sections.
+- **Changelog**: a user-visible change adds a fragment `changelog.d/<branch>.<section>.md` (see `changelog.d/README.md`) — never edit `CHANGELOG.md` in a PR; the release folds the fragments in (with none at all it falls back to commit subjects, so keep subjects readable). Do not touch released sections.
 - **Versions**: patch bumps are automatic. For a minor/major, raise `ModuleVersion` in `src/PSWorktree/PSWorktree.psd1` in the PR; the next release ships that version.
 - **Help is the contract**: change `Show-WtHelp` and paste `task help` into the README block.
 - **Commits**: imperative subject ≤72 chars, new commits (no amend), no `--no-verify`. Branches `feature/…`, `fix/…`, `chore/…` off `main`.

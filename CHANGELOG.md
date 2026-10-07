@@ -2,13 +2,9 @@
 
 All notable changes to PSWorktree (`wt`) are listed here, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are [semantic](https://semver.org/).
-Write new entries under **Unreleased** — the Release workflow stamps the version and date.
+New entries go in [changelog.d/](changelog.d/README.md), one file per pull request — the Release workflow folds them in here under the new version and date.
 
 ## [Unreleased]
-
-### Fixed
-
-- fix: release pipeline - releases exactly the commit CI verified; pushes the release commit and tag atomically; drafts the GitHub Release before the push and publishes it after, so `main` never points Scoop at a missing zip; refuses to release when CI's verdict is unknown; keeps the release token out of every step but the push; the release token check also runs weekly and skips Dependabot's pull requests; PSScriptAnalyzer crashes are retried and every job has a timeout
 
 ## [1.2.1] - 2026-10-06
 

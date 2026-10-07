@@ -10,6 +10,8 @@ src/PSWorktree/PSWorktree.psd1                module manifest (ModuleVersion is 
 src/PSWorktree/git-wt.ps1                     what the `git wt` alias runs (`wt install git` points it here)
 src/PSWorktree/wt.sh                          the bash `wt` function (`wt install bash` sources it); LF only, see .gitattributes
 tests/PSWorktree.Tests.ps1            Pester 5+ suite; builds throwaway git repos under $TestDrive
+tests/Scripts.Tests.ps1               Pester suite for the dev scripts in scripts/, pointed at $TestDrive
+changelog.d/                  one release-notes fragment per pull request; the release folds them into CHANGELOG.md
 scripts/                      lint / test / pack / set-version / cut-changelog / dev-link
 bucket/psworktree.json                Scoop manifest; this repo doubles as the Scoop bucket
 .github/workflows/ci.yml      lint + test on pwsh and Windows PowerShell 5.1, and on pwsh on Linux (WSL), then pack
@@ -81,11 +83,11 @@ The `check` job decides first, on `main`:
 
 Then the `release` job, on the commit the `check` job verified — not whatever `main` is by then:
 
-5. **Stamp** — `scripts/set-version.ps1` writes `ModuleVersion`; `scripts/cut-changelog.ps1 -FallbackFromGit` turns `## [Unreleased]` into `## [x.y.z] - <date>` and extracts that section as the release notes. An empty section is filled from the commit subjects since the last tag, so write readable subjects even when you skip the changelog.
+5. **Stamp** — `scripts/set-version.ps1` writes `ModuleVersion`; `scripts/cut-changelog.ps1 -FallbackFromGit` folds the `changelog.d/` fragments and any lines under `## [Unreleased]` into `## [x.y.z] - <date>`, grouped per Keep a Changelog section, deletes the fragments and extracts that section as the release notes. With no entries at all, the commit subjects since the last tag fill it, so write readable subjects even when you skip the changelog.
 6. **Lint + test** the stamped module.
 7. **Pack** — `scripts/pack.ps1` builds `dist/PSWorktree-x.y.z.zip` (top-level `PSWorktree/` folder with `PSWorktree.psd1`, `PSWorktree.psm1`, `LICENSE`, `NOTICE`) and prints its SHA256.
 8. **Bump the bucket** — `bucket/psworktree.json` gets the new `version`, `url` and `hash`, edited in place.
-9. **Commit** `chore: release vx.y.z` (as `github-actions[bot]`).
+9. **Commit** `chore: release vx.y.z` (as `github-actions[bot]`), the fragment deletions included.
 10. **Draft the GitHub Release** `vx.y.z` with the zip attached and the changelog section as body — before anything reaches `main`.
 11. **Tag + push** `vx.y.z` and the commit to `main` atomically: branch and tag land together or not at all.
 12. **Publish** the draft as the latest release; from then on `scoop install` can download the zip.
@@ -130,7 +132,7 @@ Not yet. winget has no notion of PowerShell modules; publishing `wt` there means
 
 ## Conventions
 
-- **Changelog** — add a line under `## [Unreleased]` for user-visible changes; the release workflow stamps the version. Never edit released sections.
+- **Changelog** — a user-visible change adds a fragment `changelog.d/<branch>.<section>.md` ([format](changelog.d/README.md)); `scripts/cut-changelog.ps1` folds the fragments into `CHANGELOG.md` at release and deletes them. Never edit released sections.
 - **Help text** — `Show-WtHelp` is the contract; the README quotes it. Change both.
 - **Commits** — new commits, no amends of published commits, no skipped hooks.
 - **Deleting directories** — always through `Remove-WorktreePath`, never through `git worktree remove` on Windows.

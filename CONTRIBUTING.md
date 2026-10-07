@@ -40,7 +40,7 @@ Do **not** open a public issue for security-sensitive bugs. Use GitHub's [privat
 2. Make your change. Keep the diff focused — one concern per PR.
 3. Run `task check` (PSScriptAnalyzer + Pester). Add or extend a test in `tests/PSWorktree.Tests.ps1` for behaviour you changed; the suite builds real throwaway git repos, so most things can be tested for real.
 4. Try it in a real repo with a few worktrees. The picker and the `clean` menu are interactive and not covered by Pester.
-5. Update [`CHANGELOG.md`](CHANGELOG.md) — add a line under **Unreleased** for any user-visible change. Never edit released sections.
+5. For any user-visible change, add a changelog fragment: `changelog.d/<branch>.<section>.md` with a `- ` bullet ([how](changelog.d/README.md)). Do not edit `CHANGELOG.md` itself: one file per PR means no PR conflicts with another over it.
 6. Update `Show-WtHelp` in `src/PSWorktree/PSWorktree.psm1` if a command, flag or behaviour changed, and paste the new `task help` output into the README's `wt --help` block.
 7. Push and open a PR against `main`. Reference any related issue (`Fixes #123`).
 
