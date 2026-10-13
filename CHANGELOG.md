@@ -6,6 +6,12 @@ New entries go in [changelog.d/](changelog.d/README.md), one file per pull reque
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-13
+
+### Fixed
+
+- fix: release pipeline - releases exactly the commit CI verified; pushes the release commit and tag atomically; drafts the GitHub Release before the push and publishes it after, so `main` never points Scoop at a missing zip; refuses to release when CI's verdict is unknown; keeps the release token out of every step but the push; the release token check also runs weekly and skips Dependabot's pull requests; PSScriptAnalyzer crashes are retried and every job has a timeout
+
 ## [1.2.1] - 2026-10-06
 
 ### Changed
@@ -80,4 +86,3 @@ New entries go in [changelog.d/](changelog.d/README.md), one file per pull reque
   (PowerShell first, robocopy as fallback).
 - Tab completion for sub-commands, worktree names and branch names.
 - Packaged as the `PSWorktree` PowerShell module; installable with Scoop from this repo's bucket.
-
