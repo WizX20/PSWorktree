@@ -504,9 +504,7 @@ function Select-Worktree {
     while ($true) {
         $all = @(Get-Worktrees)
         if (-not $all) { return }
-        # The picker drives the console directly; without one to drive (another host, piped
-        # output, or a terminal that gives native programs no console) the table has to do.
-        if ($Host.Name -ne 'ConsoleHost' -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { Show-Worktrees; return }
+        if (-not (Test-WtConsole)) { Show-Worktrees; return }
         # Last object only: a stray write inside the picker must not turn this into an array.
         $r = Show-WorktreePicker $all $filter | Select-Object -Last 1
         if (-not $r) { return }
@@ -662,10 +660,148 @@ function Resolve-CleanSelection {
     if ($missed) { Write-Host "  not a candidate: $($missed -join ', ')" -ForegroundColor Yellow }
     , @($picked | Sort-Object Path -Unique)
 }
-function Select-CleanTargets {
-    # The confirmation step: rather than one y/N over everything, offer the groups the table
-    # already shows, or a hand-picked list.
+function Test-WtConsole {
+    # The picker and the checklist drive the console directly. Without one to drive (another
+    # host, piped output, or a terminal that gives native programs no console) a table or a
+    # plain prompt has to do.
+    $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
+}
+function New-WtChecklistState {
+    # Everything the checklist knows, kept apart from drawing so the keys can be tested
+    # without a console. Every row starts ticked: Enter right away takes what a plain clean
+    # would, and you untick what should stay.
+    param([object[]]$Rows)
+    $ticked = @{}
+    foreach ($r in $Rows) { $ticked[$r.Path] = $true }
+    @{ Rows = $Rows; View = @($Rows); Filter = ''; Sel = 0; Ticked = $ticked; Result = $null }
+}
+function Invoke-WtChecklistKey {
+    # One key press: moves, ticks or filters, or ends with Result = 'confirm' | 'cancel'.
+    # Typed characters filter, as in the picker, so 'tick all' cannot be a letter: Tab ticks
+    # every row shown - or unticks them, when they all are already. Ticks survive the filter.
+    param([hashtable]$State, [string]$Key, [char]$Char)
+    $view = $State.View
+    $before = $State.Filter
+    switch ($Key) {
+        'UpArrow' { if ($view.Count) { $State.Sel = ($State.Sel - 1 + $view.Count) % $view.Count } }
+        'DownArrow' { if ($view.Count) { $State.Sel = ($State.Sel + 1) % $view.Count } }
+        'Home' { $State.Sel = 0 }
+        'End' { $State.Sel = [Math]::Max(0, $view.Count - 1) }
+        'Spacebar' { if ($view.Count) { $p = $view[$State.Sel].Path; $State.Ticked[$p] = -not $State.Ticked[$p] } }
+        'Tab' {
+            $all = @($view | Where-Object { $State.Ticked[$_.Path] }).Count -eq $view.Count
+            foreach ($r in $view) { $State.Ticked[$r.Path] = -not $all }
+        }
+        'Enter' { $State.Result = 'confirm' }
+        'Escape' { if ($State.Filter) { $State.Filter = '' } else { $State.Result = 'cancel' } }
+        'Backspace' { if ($State.Filter) { $State.Filter = $State.Filter.Substring(0, $State.Filter.Length - 1) } }
+        default { if ($Char -and -not [char]::IsControl($Char)) { $State.Filter += $Char } }
+    }
+    if ($State.Filter -ne $before) {
+        # Keep the highlight on the row it was on while the set shrinks around it.
+        $keep = if ($view.Count) { $view[$State.Sel].Path } else { '' }
+        $State.View = @(Get-WorktreeFilterMatches $State.Rows $State.Filter)
+        $State.Sel = 0
+        for ($i = 0; $i -lt $State.View.Count; $i++) { if ($State.View[$i].Path -eq $keep) { $State.Sel = $i } }
+    }
+}
+function Get-WtChecklistPicked {
+    # The ticked rows in table order, filter or not; emitted one by one, callers wrap in @().
+    param([hashtable]$State)
+    $State.Rows | Where-Object { $State.Ticked[$_.Path] }
+}
+function Get-WtChecklistHint {
+    param([string]$Filter, [int]$Shown, [int]$Total)
+    $key = 'Yellow'; $dim = 'DarkGray'
+    $head = if ($Filter) {
+        @(@{ T = '  filter '; F = $dim }, @{ T = " $Filter "; F = 'Black'; B = $key }, @{ T = "  $Shown/$Total match   "; F = 'Gray' })
+    }
+    else { @(@{ T = '  up/down'; F = $key }, @{ T = ' move   '; F = $dim }) }
+    $head + @(
+        @{ T = 'space'; F = $key }, @{ T = ' tick   '; F = $dim },
+        @{ T = 'tab'; F = $key }, @{ T = ' all/none   '; F = $dim },
+        @{ T = 'enter'; F = $key }, @{ T = ' remove ticked   '; F = $dim },
+        @{ T = 'esc'; F = $key }, @{ T = $(if ($Filter) { ' clears   ' } else { ' cancel   ' }); F = $dim },
+        @{ T = 'type'; F = $key }, @{ T = ' to filter'; F = $dim }
+    )
+}
+function Show-CleanChecklist {
+    # The candidates as a checklist, drawn like the picker: a block reserved up-front and
+    # redrawn per key. Returns the ticked rows, or nothing on Esc.
     param([object[]]$Doomed, [string]$What)
+    $s = New-WtChecklistState $Doomed
+    $w = @{}
+    foreach ($c in 'Name', 'Branch', 'State', 'Dirty', 'Size') {
+        $w[$c] = [Math]::Max($c.Length, [int]($Doomed | ForEach-Object { ([string]$_.$c).Length } | Measure-Object -Maximum).Maximum)
+    }
+    # Four for the box, two between columns; the branch gives way first, the name after.
+    $over = 4 + $w.Name + $w.Branch + $w.State + $w.Dirty + $w.Size + 2 * 4 + 2 - (Get-WtConsoleWidth)
+    foreach ($c in 'Branch', 'Name') {
+        if ($over -le 0) { break }
+        $take = [Math]::Max(0, [Math]::Min($over, $w[$c] - 8)); $w[$c] -= $take; $over -= $take
+    }
+    $cells = {
+        param($r)
+        (Format-WtCell ([string]$r.Name) $w.Name) + '  ' + (Format-WtCell ([string]$r.Branch) $w.Branch) + '  ' +
+        (Format-WtCell ([string]$r.State) $w.State) + '  ' + (Format-WtCell ([string]$r.Dirty) $w.Dirty) + '  ' +
+        ([string]$r.Size).PadLeft($w.Size)
+    }
+    [Console]::CursorVisible = $false
+    # Hint (with a blank row either side), header, rule, one row per candidate - kept even
+    # while the filter hides it, so the block stays the height it reserved - and the footer.
+    $rows = $Doomed.Count + 7
+    for ($i = 0; $i -lt $rows; $i++) { Write-Host '' }
+    $top = [Console]::CursorTop - $rows
+    if ($top -lt 0) { $top = 0 }
+    try {
+        while (-not $s.Result) {
+            [Console]::SetCursorPosition(0, $top)
+            Write-WtLine @(@{ T = '' })
+            Write-WtLine (Get-WtChecklistHint $s.Filter $s.View.Count $Doomed.Count)
+            Write-WtLine @(@{ T = '' })
+            $header = [pscustomobject]@{ Name = 'NAME'; Branch = 'BRANCH'; State = 'STATE'; Dirty = 'DIRTY'; Size = 'SIZE' }
+            Write-WtLine @(@{ T = '      ' + (& $cells $header); F = 'DarkGray' })
+            Write-WtLine @(@{ T = '      ' + ('-' * (& $cells $header).Length); F = 'DarkGray' })
+            $shown = 0
+            foreach ($r in $s.View) {
+                $box = if ($s.Ticked[$r.Path]) { '[x] ' } else { '[ ] ' }
+                if ($shown -eq $s.Sel) {
+                    Write-WtLine @(@{ T = '> ' + $box; F = 'Black'; B = 'Cyan' }, @{ T = (& $cells $r); F = 'Black'; B = 'Cyan' })
+                }
+                else {
+                    $boxColor = if ($s.Ticked[$r.Path]) { 'Green' } else { 'DarkGray' }
+                    $rowColor = if ($s.Ticked[$r.Path]) { 'White' } else { 'DarkGray' }
+                    Write-WtLine @(@{ T = '  ' + $box; F = $boxColor }, @{ T = (& $cells $r); F = $rowColor })
+                }
+                $shown++
+            }
+            if ($shown -eq 0) { Write-WtLine @(@{ T = "  nothing matches '$($s.Filter)'"; F = 'Yellow' }); $shown = 1 }
+            for ($i = $shown; $i -lt $Doomed.Count; $i++) { Write-WtLine @(@{ T = '' }) }
+            $picked = @(Get-WtChecklistPicked $s)
+            $bytes = [long]($picked | Measure-Object Bytes -Sum).Sum
+            Write-WtLine @(@{ T = "  $($picked.Count) of $($Doomed.Count) ticked, $(Format-WtSize $bytes) - $What"; F = 'Cyan' })
+            $k = [Console]::ReadKey($true)
+            Invoke-WtChecklistKey $s ([string]$k.Key) $k.KeyChar
+        }
+    }
+    finally {
+        [Console]::CursorVisible = $true
+        [Console]::SetCursorPosition(0, $top)
+        $blank = ' ' * (Get-WtConsoleWidth)
+        for ($i = 0; $i -lt $rows; $i++) { Write-Host $blank }
+        [Console]::SetCursorPosition(0, $top)
+    }
+    # Rows go out one by one: the caller wraps them in @(), and a wrapped empty array would
+    # count as one row there.
+    if ($s.Result -eq 'cancel') { return }
+    Get-WtChecklistPicked $s
+}
+function Select-CleanTargets {
+    # The confirmation step: rather than one y/N over everything, a checklist of the
+    # candidates. Without a console to draw it on, a menu of the groups the table already
+    # shows, or a typed list.
+    param([object[]]$Doomed, [string]$What)
+    if (Test-WtConsole) { return (Show-CleanChecklist $Doomed $What) }
     $merged = @($Doomed | Where-Object { $_.State -in 'merged', 'squashed' })
     $fresh = @($Doomed | Where-Object { $_.State -eq 'no-commits' -or $_.Dirty -eq 'untracked' })
     $orphans = @($Doomed | Where-Object { $_.State -eq 'orphan' })
@@ -1000,7 +1136,7 @@ USAGE:
                               local branch. Base defaults to origin/acceptance, else
                               origin/main|master, else origin/HEAD (alias: wt prune)
        -DryRun        only show what would go, and how much disk it would free
-       -Yes           skip the menu and take everything listed
+       -Yes           skip the checklist and take everything listed
        -IncludeGone   also take branches whose upstream was deleted but whose
                       content was not found on the base (closed-unmerged PRs)
        -KeepBranch    remove the worktree, keep the local branch
@@ -1025,9 +1161,12 @@ NOTES:
     filter, a second ESC closes the picker. DEL removes the highlighted worktree after
     a y/N confirmation - it refuses main and current, and offers -Force only when git
     keeps the directory back.
-  - clean ends in a menu, not a y/N: take all of it, only the merged/squashed ones, only
-    the no-commits/untracked ones, only the orphan dirs, or 's' to type names/branches
-    (space or comma separated, Tab cycles the matching candidates). -Yes skips the menu.
+  - clean ends in a checklist, not a y/N: every candidate starts ticked; Up/Down move,
+    SPACE ticks or unticks, TAB ticks every row shown (or unticks them, when all are),
+    type to filter - ticks survive it - ENTER removes what is ticked, ESC cancels. The
+    footer counts the ticked rows and the space they free. -Yes skips it. Without a
+    console to draw on, a menu instead: all, only merged/squashed, only no-commits/
+    untracked, only orphan dirs, or 's' to type names/branches (Tab completes).
   - worktrees land in <repo>/.claude/worktrees/ when the repo has a .claude dir,
     else in <repo>/.worktrees/. 'checkout' on an already-checked-out branch just cd's.
   - rm without -Force lets git do the delete, so it can hit MAX_PATH on deep
