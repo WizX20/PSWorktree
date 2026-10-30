@@ -136,7 +136,7 @@ git wt clean                 # remove worktrees whose branch already landed on o
 
 With [the `wt` command](#optional-the-wt-command) — or [the bash function](#optional-wt-in-git-bash-and-wsl) — drop the `git`: `wt add feature/login` also cd's you into the new worktree, and Enter in the picker takes you there. Help is `git wt help` — `git wt --help` is answered by git itself, with what the alias runs.
 
-`wt clean` ends in a menu rather than a blunt y/N: take everything, only the merged/squashed ones, only the never-diverged ones, only orphan directories, or pick by name with Tab completion. Nothing with uncommitted or untracked work is removed unless you say `-Force`, and `-Force` tells you what it is about to delete. Every candidate is measured first, so the table shows what each one holds, `-DryRun` says how much a clean would free, and the closing line reports what it reclaimed — `node_modules`, `bin/` and `obj/` included.
+`wt clean` ends in a checklist rather than a blunt y/N. Every candidate starts ticked: Space unticks what should stay, Tab ticks or unticks every row shown, typing filters the list (ticks survive it), and Enter removes what is ticked; the footer counts the ticked rows and the space they free. Without a console to draw on — output piped, say — it asks in a menu instead: everything, only the merged/squashed ones, only the never-diverged ones, only orphan directories, or by name with Tab completion. Nothing with uncommitted or untracked work is removed unless you say `-Force`, and `-Force` tells you what it is about to delete. Every candidate is measured first, so the table shows what each one holds, `-DryRun` says how much a clean would free, and the closing line reports what it reclaimed — `node_modules`, `bin/` and `obj/` included.
 
 ## Help: `git wt help`
 
@@ -167,7 +167,7 @@ USAGE:
                               local branch. Base defaults to origin/acceptance, else
                               origin/main|master, else origin/HEAD (alias: wt prune)
        -DryRun        only show what would go, and how much disk it would free
-       -Yes           skip the menu and take everything listed
+       -Yes           skip the checklist and take everything listed
        -IncludeGone   also take branches whose upstream was deleted but whose
                       content was not found on the base (closed-unmerged PRs)
        -KeepBranch    remove the worktree, keep the local branch
@@ -192,9 +192,12 @@ NOTES:
     filter, a second ESC closes the picker. DEL removes the highlighted worktree after
     a y/N confirmation - it refuses main and current, and offers -Force only when git
     keeps the directory back.
-  - clean ends in a menu, not a y/N: take all of it, only the merged/squashed ones, only
-    the no-commits/untracked ones, only the orphan dirs, or 's' to type names/branches
-    (space or comma separated, Tab cycles the matching candidates). -Yes skips the menu.
+  - clean ends in a checklist, not a y/N: every candidate starts ticked; Up/Down move,
+    SPACE ticks or unticks, TAB ticks every row shown (or unticks them, when all are),
+    type to filter - ticks survive it - ENTER removes what is ticked, ESC cancels. The
+    footer counts the ticked rows and the space they free. -Yes skips it. Without a
+    console to draw on, a menu instead: all, only merged/squashed, only no-commits/
+    untracked, only orphan dirs, or 's' to type names/branches (Tab completes).
   - worktrees land in <repo>/.claude/worktrees/ when the repo has a .claude dir,
     else in <repo>/.worktrees/. 'checkout' on an already-checked-out branch just cd's.
   - rm without -Force lets git do the delete, so it can hit MAX_PATH on deep

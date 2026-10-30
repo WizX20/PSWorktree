@@ -402,6 +402,75 @@ Describe 'worktree lifecycle' {
     }
 }
 
+Describe 'clean checklist keys' {
+    # The checklist's state, one key at a time - no console involved.
+    BeforeAll {
+        $script:checkRows = @(
+            [pscustomobject]@{ Name = 'feat-merged'; Branch = 'feat-merged'; Path = 'p1'; Bytes = 3MB },
+            [pscustomobject]@{ Name = 'feat-squashed'; Branch = 'feat-squashed'; Path = 'p2'; Bytes = 12KB },
+            [pscustomobject]@{ Name = 'leftover'; Branch = '-'; Path = 'p3'; Bytes = 0 }
+        )
+    }
+
+    It 'starts with every row ticked; space unticks the highlighted one' {
+        InModuleScope PSWorktree -Parameters @{ Rows = $script:checkRows } {
+            param($Rows)
+            $s = New-WtChecklistState $Rows
+            @(Get-WtChecklistPicked $s).Count | Should -Be 3
+            Invoke-WtChecklistKey $s 'DownArrow' ([char]0)
+            Invoke-WtChecklistKey $s 'Spacebar' ' '
+            (Get-WtChecklistPicked $s).Name | Should -Be @('feat-merged', 'leftover')
+            Invoke-WtChecklistKey $s 'Spacebar' ' '
+            @(Get-WtChecklistPicked $s).Count | Should -Be 3
+            Invoke-WtChecklistKey $s 'UpArrow' ([char]0)
+            Invoke-WtChecklistKey $s 'UpArrow' ([char]0)                 # wraps to the last row
+            $s.View[$s.Sel].Name | Should -Be 'leftover'
+        }
+    }
+
+    It 'tab unticks all shown rows, then ticks them again' {
+        InModuleScope PSWorktree -Parameters @{ Rows = $script:checkRows } {
+            param($Rows)
+            $s = New-WtChecklistState $Rows
+            Invoke-WtChecklistKey $s 'Tab' "`t"
+            @(Get-WtChecklistPicked $s).Count | Should -Be 0
+            Invoke-WtChecklistKey $s 'Tab' "`t"
+            @(Get-WtChecklistPicked $s).Count | Should -Be 3
+        }
+    }
+
+    It 'filters as you type, tab works on the shown rows only, and ticks survive the filter' {
+        InModuleScope PSWorktree -Parameters @{ Rows = $script:checkRows } {
+            param($Rows)
+            $s = New-WtChecklistState $Rows
+            Invoke-WtChecklistKey $s 'Tab' "`t"                          # none ticked
+            foreach ($c in 'feat'.ToCharArray()) { Invoke-WtChecklistKey $s ([string]$c).ToUpper() $c }
+            $s.Filter | Should -Be 'feat'
+            $s.View.Name | Should -Be @('feat-merged', 'feat-squashed')
+            Invoke-WtChecklistKey $s 'Tab' "`t"                          # tick what matches
+            Invoke-WtChecklistKey $s 'Escape' ([char]27)                 # first Esc clears the filter
+            $s.Result | Should -BeNullOrEmpty
+            $s.View.Count | Should -Be 3
+            (Get-WtChecklistPicked $s).Name | Should -Be @('feat-merged', 'feat-squashed')
+            Invoke-WtChecklistKey $s 'Enter' "`r"
+            $s.Result | Should -Be 'confirm'
+        }
+    }
+
+    It 'keeps the highlight on its row while the filter narrows, and Esc without a filter cancels' {
+        InModuleScope PSWorktree -Parameters @{ Rows = $script:checkRows } {
+            param($Rows)
+            $s = New-WtChecklistState $Rows
+            Invoke-WtChecklistKey $s 'DownArrow' ([char]0)               # feat-squashed
+            Invoke-WtChecklistKey $s 'S' 's'
+            $s.View[$s.Sel].Name | Should -Be 'feat-squashed'
+            Invoke-WtChecklistKey $s 'Backspace' ([char]8)
+            Invoke-WtChecklistKey $s 'Escape' ([char]27)
+            $s.Result | Should -Be 'cancel'
+        }
+    }
+}
+
 Describe 'clean' {
     BeforeEach {
         $script:repo = New-TestRepo
@@ -517,6 +586,31 @@ Describe 'clean' {
         $out | Should -Match "failed to delete 'feat-merged'"
         $out | Should -Match 'cleaned 2 of 3 worktree\(s\) \+ local branch\(es\), reclaimed \d+ B'
         $out | Should -Not -Match 'reclaimed 3 MB'
+    }
+
+    It 'with a console, removes only what the checklist hands back' {
+        Mock -ModuleName PSWorktree Test-WtConsole { $true }
+        Mock -ModuleName PSWorktree Show-CleanChecklist { $Doomed | Where-Object { $_.Name -eq 'feat-empty' } }
+        $out = Get-WtOutput { wt clean -NoFetch }
+        $out | Should -Match "removed 'feat-empty'"
+        $out | Should -Match 'cleaned 1 of 1'
+        (git worktree list).Count | Should -Be 4
+    }
+
+    It 'removes nothing when the checklist is cancelled' {
+        Mock -ModuleName PSWorktree Test-WtConsole { $true }
+        Mock -ModuleName PSWorktree Show-CleanChecklist { }
+        Get-WtOutput { wt clean -NoFetch } | Should -Match 'nothing selected'
+        (git worktree list).Count | Should -Be 5
+    }
+
+    It 'falls back to the text menu without a console' {
+        Mock -ModuleName PSWorktree Test-WtConsole { $false }
+        Mock -ModuleName PSWorktree Read-Host { 'm' }
+        $out = Get-WtOutput { wt clean -NoFetch }
+        $out | Should -Match 'm  merged/squashed \(2\)'
+        $out | Should -Match 'cleaned 2 of 2'
+        (git worktree list).Count | Should -Be 3
     }
 
     It 'keeps a worktree with untracked files unless -Force, and names them' {

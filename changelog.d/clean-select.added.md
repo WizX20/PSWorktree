@@ -1,0 +1,1 @@
+- feat: `wt clean` ends in a checklist: every candidate starts ticked, Space unticks what should stay, Tab ticks or unticks every row shown, typing filters (ticks survive it), Enter removes what is ticked, and the footer counts the ticked rows and the space they free. Without a console the old menu is still there (#26)
